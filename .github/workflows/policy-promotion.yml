@@ -35,19 +35,18 @@ jobs:
       - name: Configure Chef
         env:
           CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
-          CHEF_ORG: ${{ secrets.CHEF_ORG }}
           CHEF_USER: ${{ secrets.CHEF_USER }}
           CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
         run: |
           mkdir -p ~/.chef
-          cat > ~/.chef/credentials <<EOF
-[default]
-chef_server_url = ${CHEF_SERVER_URL}
-client_name = ${CHEF_USER}
-client_key = ~/.chef/ci-user.pem
-EOF
           echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
           chmod 600 ~/.chef/ci-user.pem
+
+          printf "[default]\nchef_server_url = %s\nclient_name = %s\nclient_key = %s\n" \
+            "${CHEF_SERVER_URL}" \
+            "${CHEF_USER}" \
+            "/home/runner/.chef/ci-user.pem" \
+            > ~/.chef/credentials
 
       - name: Install & Push to test
         working-directory: cookbooks/sample_nginix
@@ -72,19 +71,18 @@ EOF
       - name: Configure Chef
         env:
           CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
-          CHEF_ORG: ${{ secrets.CHEF_ORG }}
           CHEF_USER: ${{ secrets.CHEF_USER }}
           CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
         run: |
           mkdir -p ~/.chef
-          cat > ~/.chef/credentials <<EOF
-[default]
-chef_server_url = ${CHEF_SERVER_URL}
-client_name = ${CHEF_USER}
-client_key = ~/.chef/ci-user.pem
-EOF
           echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
           chmod 600 ~/.chef/ci-user.pem
+
+          printf "[default]\nchef_server_url = %s\nclient_name = %s\nclient_key = %s\n" \
+            "${CHEF_SERVER_URL}" \
+            "${CHEF_USER}" \
+            "/home/runner/.chef/ci-user.pem" \
+            > ~/.chef/credentials
 
       - name: Promote to ${{ github.event.inputs.target_group }}
         working-directory: cookbooks/sample_nginix
