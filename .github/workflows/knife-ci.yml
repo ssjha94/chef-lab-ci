@@ -34,4 +34,4 @@ jobs:
           chmod 600 ~/.chef/ci-user.pem
 
       - name: Knife smoke test
-        run: knife node list
+        run: /opt/chef/bin/knife node list
