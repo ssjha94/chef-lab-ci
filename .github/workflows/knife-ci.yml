@@ -14,6 +14,7 @@ jobs:
       - name: Install Chef
         run: |
           curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef
+          echo "/opt/chef/bin" >> $GITHUB_PATH
 
       - name: Configure knife
         env:
