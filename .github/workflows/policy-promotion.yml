@@ -87,5 +87,5 @@ jobs:
       - name: Promote to ${{ github.event.inputs.target_group }}
         working-directory: cookbooks/sample_nginix
         run: |
-          REVISION=$(chef show-policy sample_nginx --policy-group test --format json | jq -r '.revision_id')
+          REVISION=$(jq -r '.revision_id' Policyfile.lock.json)
           chef promote sample_nginx ${REVISION} ${{ github.event.inputs.target_group }}
