@@ -1,0 +1,93 @@
+name: Policy Promotion
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "cookbooks/sample_nginix/Policyfile.lock.json"
+  workflow_dispatch:
+    inputs:
+      target_group:
+        description: "Target policy group (stage or prod)"
+        required: true
+        default: "stage"
+        type: choice
+        options:
+          - stage
+          - prod
+
+concurrency:
+  group: policy-promotion
+  cancel-in-progress: false
+
+jobs:
+  push_test:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Chef Workstation
+        run: |
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation -v 25.12.1102
+          echo "/opt/chef-workstation/bin" >> $GITHUB_PATH
+
+      - name: Configure Chef
+        env:
+          CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
+          CHEF_ORG: ${{ secrets.CHEF_ORG }}
+          CHEF_USER: ${{ secrets.CHEF_USER }}
+          CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+        run: |
+          mkdir -p ~/.chef
+          cat > ~/.chef/credentials <<EOF
+[default]
+chef_server_url = ${CHEF_SERVER_URL}
+client_name = ${CHEF_USER}
+client_key = ~/.chef/ci-user.pem
+EOF
+          echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
+          chmod 600 ~/.chef/ci-user.pem
+
+      - name: Install & Push to test
+        working-directory: cookbooks/sample_nginix
+        run: |
+          chef install
+          chef push test
+
+  promote:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Chef Workstation
+        run: |
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation -v 25.12.1102
+          echo "/opt/chef-workstation/bin" >> $GITHUB_PATH
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Configure Chef
+        env:
+          CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
+          CHEF_ORG: ${{ secrets.CHEF_ORG }}
+          CHEF_USER: ${{ secrets.CHEF_USER }}
+          CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+        run: |
+          mkdir -p ~/.chef
+          cat > ~/.chef/credentials <<EOF
+[default]
+chef_server_url = ${CHEF_SERVER_URL}
+client_name = ${CHEF_USER}
+client_key = ~/.chef/ci-user.pem
+EOF
+          echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
+          chmod 600 ~/.chef/ci-user.pem
+
+      - name: Promote to ${{ github.event.inputs.target_group }}
+        working-directory: cookbooks/sample_nginix
+        run: |
+          REVISION=$(chef show-policy sample_nginx --policy-group test --format json | jq -r '.revision_id')
+          chef promote sample_nginx ${REVISION} ${{ github.event.inputs.target_group }}
