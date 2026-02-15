@@ -11,10 +11,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Chef
+      - name: Install Chef Workstation
         run: |
-          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef
-          echo "/opt/chef/bin" >> $GITHUB_PATH
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation
+          echo "/opt/chef-workstation/bin" >> $GITHUB_PATH
 
       - name: Configure knife
         env:
