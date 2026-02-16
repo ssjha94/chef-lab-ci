@@ -54,8 +54,12 @@ jobs:
       - name: Install & Push to test
         working-directory: cookbooks/sample_nginix
         run: |
+          set -e
+          echo "Installing from Policyfile..."
           chef install
+          echo "Pushing policy to test group..."
           chef push test
+          echo "Policy pushed successfully!"
 
   promote:
     if: github.event_name == 'workflow_dispatch'
@@ -87,8 +91,36 @@ jobs:
             "/home/runner/.chef/ci-user.pem" \
             > ~/.chef/credentials
 
+      - name: Debug - Check Policyfile
+        working-directory: cookbooks/sample_nginix
+        run: |
+          set -e
+          echo "=== Listing directory contents ==="
+          ls -lh
+          echo "=== Policyfile.lock.json exists ==="
+          test -f Policyfile.lock.json && echo "✓ File exists" || echo "✗ File NOT found"
+          echo "=== Extracting revision ==="
+          cat Policyfile.lock.json | head -20
+
       - name: Promote to ${{ github.event.inputs.target_group }}
         working-directory: cookbooks/sample_nginix
         run: |
+          set -e
+          echo "Extracting revision from Policyfile.lock.json..."
           REVISION=$(jq -r '.revision_id' Policyfile.lock.json)
-          chef promote sample_nginx ${REVISION} ${{ github.event.inputs.target_group }}
+          
+          if [ -z "$REVISION" ] || [ "$REVISION" = "null" ]; then
+            echo "ERROR: Could not extract revision ID"
+            exit 1
+          fi
+          
+          echo "✓ Revision: $REVISION"
+          echo "Promoting sample_nginx@$REVISION to ${{ github.event.inputs.target_group }}..."
+          chef promote sample_nginx $REVISION ${{ github.event.inputs.target_group }}
+          echo "✓ Promotion complete!"
+
+      - name: Verify promotion
+        working-directory: cookbooks/sample_nginix
+        run: |
+          echo "Verifying policy in ${{ github.event.inputs.target_group }} group..."
+          knife show policy sample_nginx ${{ github.event.inputs.target_group }}
