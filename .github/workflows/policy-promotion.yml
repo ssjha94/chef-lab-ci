@@ -16,6 +16,9 @@ on:
           - stage
           - prod
 
+env:
+  CHEF_LICENSE: accept-silent
+
 concurrency:
   group: policy-promotion
   cancel-in-progress: false
