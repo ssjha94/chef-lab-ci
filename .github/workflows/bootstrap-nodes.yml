@@ -66,7 +66,7 @@ jobs:
             NODE_NAME="node-${POLICY_GROUP}-${TIMESTAMP}-${i}"
             NODE_NAMES+=("$NODE_NAME")
             echo "Creating Chef client: $NODE_NAME"
-            knife client create "$NODE_NAME" -f "/tmp/${NODE_NAME}.pem" -a --admin || true
+            knife client create "$NODE_NAME" -f "/tmp/${NODE_NAME}.pem" || true
             if [ ! -f "/tmp/${NODE_NAME}.pem" ]; then
               echo "ERROR: Failed to create client key for $NODE_NAME"
               exit 1
