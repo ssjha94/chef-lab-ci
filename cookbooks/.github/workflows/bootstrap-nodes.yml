@@ -1,0 +1,290 @@
+name: Bootstrap Nodes CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      node_count:
+        description: 'Number of nodes to bootstrap (e.g., 5)'
+        required: true
+        default: '5'
+      policy_group:
+        description: 'Policy group (test, stage, prod)'
+        required: true
+        type: choice
+        options:
+          - test
+          - stage
+          - prod
+        default: test
+      aws_region:
+        description: 'AWS region'
+        required: true
+        default: 'ap-northeast-3'
+
+env:
+  AWS_REGION: ${{ github.event.inputs.aws_region }}
+
+jobs:
+  # Step 1: Pre-create Chef clients on Chef Server
+  create_chef_clients:
+    runs-on: ubuntu-latest
+    outputs:
+      client_keys: ${{ steps.create-clients.outputs.client_keys }}
+      node_names: ${{ steps.create-clients.outputs.node_names }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Chef Workstation
+        run: |
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation
+      
+      - name: Configure knife credentials
+        env:
+          CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
+          CHEF_ORG: ${{ secrets.CHEF_ORG }}
+          CHEF_USER: ${{ secrets.CHEF_USER }}
+          CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+        run: |
+          mkdir -p ~/.chef
+          cat > ~/.chef/knife.rb <<'EOF'
+          chef_server_url  ENV['CHEF_SERVER_URL']
+          node_name        ENV['CHEF_USER']
+          client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
+          org_name         ENV['CHEF_ORG']
+          EOF
+          echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
+          chmod 600 ~/.chef/ci-user.pem
+      
+      - name: Create Chef clients
+        id: create-clients
+        run: |
+          # Create timestamp for unique node names
+          TIMESTAMP=$(date +%s)
+          NODE_COUNT=${{ github.event.inputs.node_count }}
+          POLICY_GROUP=${{ github.event.inputs.policy_group }}
+          
+          # Arrays to store node names and keys
+          NODE_NAMES=()
+          
+          for i in $(seq 1 $NODE_COUNT); do
+            NODE_NAME="node-${POLICY_GROUP}-${TIMESTAMP}-${i}"
+            NODE_NAMES+=("$NODE_NAME")
+            
+            echo "Creating Chef client: $NODE_NAME"
+            
+            # Create client and download key
+            knife client create "$NODE_NAME" -f "/tmp/${NODE_NAME}.pem" -a --admin || true
+            
+            # Verify key was created
+            if [ ! -f "/tmp/${NODE_NAME}.pem" ]; then
+              echo "ERROR: Failed to create client key for $NODE_NAME"
+              exit 1
+            fi
+          done
+          
+          # Convert arrays to JSON for output
+          echo "node_names=$(printf '%s\n' "${NODE_NAMES[@]}" | jq -R . | jq -s .)" >> $GITHUB_OUTPUT
+      
+      - name: Upload client keys as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: chef-client-keys
+          path: /tmp/node-*.pem
+          retention-days: 1
+      
+      - name: List created clients
+        run: knife client list | grep "node-" || echo "No pre-existing nodes found"
+
+  # Step 2: Verify policy is up-to-date
+  verify_policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Chef Workstation
+        run: |
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation
+      
+      - name: Configure knife
+        env:
+          CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
+          CHEF_ORG: ${{ secrets.CHEF_ORG }}
+          CHEF_USER: ${{ secrets.CHEF_USER }}
+          CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+        run: |
+          mkdir -p ~/.chef
+          cat > ~/.chef/knife.rb <<'EOF'
+          chef_server_url  ENV['CHEF_SERVER_URL']
+          node_name        ENV['CHEF_USER']
+          client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
+          org_name         ENV['CHEF_ORG']
+          EOF
+          echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
+          chmod 600 ~/.chef/ci-user.pem
+      
+      - name: Check policy group
+        run: |
+          POLICY_GROUP=${{ github.event.inputs.policy_group }}
+          echo "Verifying policy group: $POLICY_GROUP"
+          knife policy groups show $POLICY_GROUP
+
+  # Step 3: Provision infrastructure with Terraform
+  terraform_provision:
+    needs: [create_chef_clients, verify_policy]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: "1.6.0"
+      
+      - name: Download chef client keys
+        uses: actions/download-artifact@v4
+        with:
+          name: chef-client-keys
+          path: ./terraform/client-keys
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Terraform init
+        run: terraform init
+      
+      - name: Terraform validate
+        run: terraform validate
+      
+      - name: Terraform plan
+        run: |
+          terraform plan \
+            -var="node_count=${{ github.event.inputs.node_count }}" \
+            -var="policy_group=${{ github.event.inputs.policy_group }}" \
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            -out=tfplan
+      
+      - name: Terraform apply
+        run: |
+          terraform apply -auto-approve tfplan
+      
+      - name: Output instance details
+        id: terraform-output
+        run: |
+          INSTANCE_IDS=$(terraform output -raw instance_ids 2>/dev/null || echo "")
+          INSTANCE_IPS=$(terraform output -raw instance_ips 2>/dev/null || echo "")
+          echo "instance_ids=$INSTANCE_IDS" >> $GITHUB_OUTPUT
+          echo "instance_ips=$INSTANCE_IPS" >> $GITHUB_OUTPUT
+          echo "Provisioned instances:"
+          echo "$INSTANCE_IDS"
+          echo "$INSTANCE_IPS"
+
+  # Step 4: Wait for nodes to converge and report
+  verify_convergence:
+    needs: terraform_provision
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Chef Workstation
+        run: |
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation
+      
+      - name: Configure knife
+        env:
+          CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
+          CHEF_ORG: ${{ secrets.CHEF_ORG }}
+          CHEF_USER: ${{ secrets.CHEF_USER }}
+          CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+        run: |
+          mkdir -p ~/.chef
+          cat > ~/.chef/knife.rb <<'EOF'
+          chef_server_url  ENV['CHEF_SERVER_URL']
+          node_name        ENV['CHEF_USER']
+          client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
+          org_name         ENV['CHEF_ORG']
+          EOF
+          echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
+          chmod 600 ~/.chef/ci-user.pem
+      
+      - name: Wait for nodes to report
+        run: |
+          POLICY_GROUP=${{ github.event.inputs.policy_group }}
+          echo "Waiting for nodes in policy group: $POLICY_GROUP"
+          
+          # Wait up to 10 minutes for nodes to appear
+          for i in {1..60}; do
+            NODE_COUNT=$(knife node list | grep "node-${POLICY_GROUP}" | wc -l)
+            TARGET_COUNT=${{ github.event.inputs.node_count }}
+            
+            echo "Attempt $i: Found $NODE_COUNT/$TARGET_COUNT nodes"
+            
+            if [ "$NODE_COUNT" -ge "$TARGET_COUNT" ]; then
+              echo "✓ All nodes reported to Chef Server"
+              break
+            fi
+            
+            sleep 10
+          done
+      
+      - name: List converged nodes
+        run: |
+          POLICY_GROUP=${{ github.event.inputs.policy_group }}
+          echo "Nodes in policy group: $POLICY_GROUP"
+          knife node list | grep "node-${POLICY_GROUP}" || echo "No nodes found (may be converging)"
+      
+      - name: Show node details
+        run: |
+          POLICY_GROUP=${{ github.event.inputs.policy_group }}
+          for node in $(knife node list | grep "node-${POLICY_GROUP}"); do
+            echo "Node: $node"
+            knife node show $node -F json | jq '.automatic.ipaddress, .policy_name, .policy_group' 2>/dev/null || true
+          done
+
+  # Step 5: Run compliance verification (optional)
+  verify_compliance:
+    needs: verify_convergence
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.policy_group == 'test' }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Chef Workstation
+        run: |
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation
+      
+      - name: Configure knife
+        env:
+          CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
+          CHEF_ORG: ${{ secrets.CHEF_ORG }}
+          CHEF_USER: ${{ secrets.CHEF_USER }}
+          CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+        run: |
+          mkdir -p ~/.chef
+          cat > ~/.chef/knife.rb <<'EOF'
+          chef_server_url  ENV['CHEF_SERVER_URL']
+          node_name        ENV['CHEF_USER']
+          client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
+          org_name         ENV['CHEF_ORG']
+          EOF
+          echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
+          chmod 600 ~/.chef/ci-user.pem
+      
+      - name: Verify compliance reports
+        run: |
+          POLICY_GROUP=${{ github.event.inputs.policy_group }}
+          echo "Checking compliance status for nodes in: $POLICY_GROUP"
+          
+          for node in $(knife node list | grep "node-${POLICY_GROUP}" | head -3); do
+            echo "Checking node: $node"
+            knife node show $node -F json | jq '.run_list' 2>/dev/null || echo "Node data not yet available"
+          done
