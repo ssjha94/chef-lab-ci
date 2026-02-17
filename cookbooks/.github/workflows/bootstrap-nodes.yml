@@ -50,7 +50,7 @@ jobs:
           cat > ~/.chef/knife.rb <<'EOF'
           chef_server_url  ENV['CHEF_SERVER_URL']
           node_name        ENV['CHEF_USER']
-          client_key       "#{ENV['HOME']}/.chef/ci-user.pem"
+          client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
           org_name         ENV['CHEF_ORG']
           EOF
           echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
@@ -117,7 +117,7 @@ jobs:
           cat > ~/.chef/knife.rb <<'EOF'
           chef_server_url  ENV['CHEF_SERVER_URL']
           node_name        ENV['CHEF_USER']
-          client_key       "#{ENV['HOME']}/.chef/ci-user.pem"
+          client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
           org_name         ENV['CHEF_ORG']
           EOF
           echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
@@ -209,7 +209,7 @@ jobs:
           cat > ~/.chef/knife.rb <<'EOF'
           chef_server_url  ENV['CHEF_SERVER_URL']
           node_name        ENV['CHEF_USER']
-          client_key       "#{ENV['HOME']}/.chef/ci-user.pem"
+          client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
           org_name         ENV['CHEF_ORG']
           EOF
           echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
@@ -273,7 +273,7 @@ jobs:
           cat > ~/.chef/knife.rb <<'EOF'
           chef_server_url  ENV['CHEF_SERVER_URL']
           node_name        ENV['CHEF_USER']
-          client_key       "#{ENV['HOME']}/.chef/ci-user.pem"
+          client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
           org_name         ENV['CHEF_ORG']
           EOF
           echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
