@@ -46,10 +46,10 @@ jobs:
         run: |
           mkdir -p ~/.chef
           cat > ~/.chef/knife.rb <<'EOF'
-          chef_server_url  ENV['CHEF_SERVER_URL']
-          node_name        ENV['CHEF_USER']
-          client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
-          org_name         ENV['CHEF_ORG']
+          chef_server_url  "#{ENV['CHEF_SERVER_URL']}"
+          node_name        "#{ENV['CHEF_USER']}"
+          client_key       "#{ENV['HOME']}/.chef/ci-user.pem"
+          org_name         "#{ENV['CHEF_ORG']}"
           EOF
           echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
           chmod 600 ~/.chef/ci-user.pem
@@ -101,10 +101,10 @@ jobs:
         run: |
           mkdir -p ~/.chef
           cat > ~/.chef/knife.rb <<'EOF'
-          chef_server_url  ENV['CHEF_SERVER_URL']
-          node_name        ENV['CHEF_USER']
-          client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
-          org_name         ENV['CHEF_ORG']
+          chef_server_url  "#{ENV['CHEF_SERVER_URL']}"
+          node_name        "#{ENV['CHEF_USER']}"
+          client_key       "#{ENV['HOME']}/.chef/ci-user.pem"
+          org_name         "#{ENV['CHEF_ORG']}"
           EOF
           echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
           chmod 600 ~/.chef/ci-user.pem
@@ -112,8 +112,8 @@ jobs:
       - name: Check policy group
         run: |
           POLICY_GROUP=${{ github.event.inputs.policy_group }}
-          echo "Verifying policy group: $POLICY_GROUP"
-          knife policy groups show $POLICY_GROUP || echo "Policy group $POLICY_GROUP not found, creating..."
+          echo "Using policy group: $POLICY_GROUP"
+          echo "Policy will be applied by terraform during node bootstrap"
 
   terraform_provision:
     needs: [create_chef_clients, verify_policy]
@@ -189,10 +189,10 @@ jobs:
         run: |
           mkdir -p ~/.chef
           cat > ~/.chef/knife.rb <<'EOF'
-          chef_server_url  ENV['CHEF_SERVER_URL']
-          node_name        ENV['CHEF_USER']
-          client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
-          org_name         ENV['CHEF_ORG']
+          chef_server_url  "#{ENV['CHEF_SERVER_URL']}"
+          node_name        "#{ENV['CHEF_USER']}"
+          client_key       "#{ENV['HOME']}/.chef/ci-user.pem"
+          org_name         "#{ENV['CHEF_ORG']}"
           EOF
           echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
           chmod 600 ~/.chef/ci-user.pem
@@ -238,10 +238,10 @@ jobs:
         run: |
           mkdir -p ~/.chef
           cat > ~/.chef/knife.rb <<'EOF'
-          chef_server_url  ENV['CHEF_SERVER_URL']
-          node_name        ENV['CHEF_USER']
-          client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
-          org_name         ENV['CHEF_ORG']
+          chef_server_url  "#{ENV['CHEF_SERVER_URL']}"
+          node_name        "#{ENV['CHEF_USER']}"
+          client_key       "#{ENV['HOME']}/.chef/ci-user.pem"
+          org_name         "#{ENV['CHEF_ORG']}"
           EOF
           echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
           chmod 600 ~/.chef/ci-user.pem
