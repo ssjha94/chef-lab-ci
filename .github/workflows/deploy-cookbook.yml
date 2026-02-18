@@ -134,26 +134,31 @@ jobs:
         run: |
           echo "🔍 Validating version bump for ${{ matrix.cookbook }}..."
           
-          # Get versions
+          # Get current version
           CURRENT_VERSION=$(grep -E "^version" metadata.rb | head -1 | awk '{print $2}' | tr -d "'\"")
-          
-          # Get previous version from main branch
-          git fetch origin main --depth=1 2>/dev/null || true
-          
-          PREVIOUS_VERSION=$(git show origin/main:cookbooks/${{ matrix.cookbook }}/metadata.rb 2>/dev/null | grep -E "^version" | head -1 | awk '{print $2}' | tr -d "'\"")
-          
           echo "📦 Current version: $CURRENT_VERSION"
-          echo "📦 Previous version: $PREVIOUS_VERSION"
           
-          if [ "$CURRENT_VERSION" == "$PREVIOUS_VERSION" ] || [ -z "$PREVIOUS_VERSION" ]; then
-            echo "❌ ERROR: Version was not bumped!"
-            echo "   Current: $CURRENT_VERSION"
-            echo "   Previous: $PREVIOUS_VERSION"
-            echo "   Please bump the version in metadata.rb before pushing"
-            exit 1
+          # Check if this cookbook exists in main branch
+          if git show main:cookbooks/${{ matrix.cookbook }}/metadata.rb >/dev/null 2>&1; then
+            # Cookbook exists - get previous version
+            PREVIOUS_VERSION=$(git show main:cookbooks/${{ matrix.cookbook }}/metadata.rb 2>/dev/null | grep -E "^version" | head -1 | awk '{print $2}' | tr -d "'\"")
+            echo "📦 Previous version (main): $PREVIOUS_VERSION"
+            
+            # Compare versions
+            if [ "$CURRENT_VERSION" == "$PREVIOUS_VERSION" ]; then
+              echo "❌ ERROR: Version was not bumped!"
+              echo "   Current: $CURRENT_VERSION"
+              echo "   Previous: $PREVIOUS_VERSION"
+              echo "   Please bump the version in metadata.rb before pushing"
+              exit 1
+            else
+              echo "✅ Version properly bumped from $PREVIOUS_VERSION to $CURRENT_VERSION"
+            fi
+          else
+            # New cookbook - this is the first version
+            echo "🆕 New cookbook detected - this will be version $CURRENT_VERSION"
+            echo "✅ First version is acceptable"
           fi
-          
-          echo "✅ Version properly bumped from $PREVIOUS_VERSION to $CURRENT_VERSION"
 
   upload:
     name: Upload - ${{ matrix.cookbook }}
