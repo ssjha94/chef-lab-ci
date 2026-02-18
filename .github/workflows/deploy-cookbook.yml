@@ -210,32 +210,24 @@ jobs:
 
       - name: Get Cookbook Metadata
         id: metadata
-        working-directory: cookbooks/${{ matrix.cookbook }}
         run: |
-          echo "🔍 Looking for metadata.rb in $(pwd)"
-          
-          if [ ! -f metadata.rb ]; then
-            echo "❌ ERROR: metadata.rb not found in $(pwd)"
-            echo "Contents of current directory:"
-            ls -la
+          COOKBOOK_PATH="cookbooks/${{ matrix.cookbook }}"
+
+          echo "🔎 Checking cookbook path: $COOKBOOK_PATH"
+          ls -la "$COOKBOOK_PATH" || exit 1
+
+          if [ ! -f "$COOKBOOK_PATH/metadata.rb" ]; then
+            echo "❌ ERROR: metadata.rb not found in $COOKBOOK_PATH"
             exit 1
           fi
-          
-          NAME=$(grep -E "^name" metadata.rb | head -1 | awk -F"'" '{print $2}')
-          VERSION=$(grep -E "^version" metadata.rb | head -1 | awk -F"'" '{print $2}')
-          
-          # Set outputs
+
+          NAME=$(grep -E "^name" "$COOKBOOK_PATH/metadata.rb" | head -1 | awk -F"'" '{print $2}')
+          VERSION=$(grep -E "^version" "$COOKBOOK_PATH/metadata.rb" | head -1 | awk -F"'" '{print $2}')
+
           echo "name=$NAME" >> $GITHUB_OUTPUT
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          
-          if [ -z "$NAME" ] || [ -z "$VERSION" ]; then
-            echo "❌ ERROR: Could not extract name or version from metadata.rb"
-            echo "Contents of metadata.rb:"
-            cat metadata.rb
-            exit 1
-          fi
-          
-          echo "✅ Cookbook: $NAME v$VERSION"
+
+          echo "📦 Cookbook: $NAME v$VERSION"
 
       - name: Upload to Chef Server (Freeze Only - No Force)
         working-directory: cookbooks/${{ matrix.cookbook }}
