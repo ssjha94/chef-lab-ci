@@ -1,5 +1,5 @@
 name 'sample_nginix'
 description 'Sample nginx cookbook with compliance'
-version '0.1.1'
+version '0.1.2'
 supports 'ubuntu', '>= 20.04'
 depends 'audit'
