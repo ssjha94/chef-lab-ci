@@ -158,7 +158,7 @@ jobs:
   upload:
     name: Upload - ${{ matrix.cookbook }}
     needs: [detect-cookbooks, validate-version]
-    if: success()  # ✅ FIX #2: Only upload on successful pipeline
+    if: success()
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -240,10 +240,10 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create release tag
-        working-directory: cookbooks/${{ matrix.cookbook }}
         run: |
-          VERSION=$(grep -E "^version" metadata.rb | head -1 | awk '{print $2}' | tr -d "'\"")
-          TAG_NAME="${{ matrix.cookbook }}-v${VERSION}"
+          COOKBOOK="${{ matrix.cookbook }}"
+          VERSION=$(grep -E "^version" "cookbooks/${COOKBOOK}/metadata.rb" | head -1 | awk '{print $2}' | tr -d "'\"")
+          TAG_NAME="${COOKBOOK}-v${VERSION}"
           
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -252,7 +252,7 @@ jobs:
           if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
             echo "⚠️  Tag $TAG_NAME already exists, skipping"
           else
-            git tag -a "$TAG_NAME" -m "Release ${{ matrix.cookbook }} v${VERSION}" || true
+            git tag -a "$TAG_NAME" -m "Release $COOKBOOK v${VERSION}" || true
             git push --tags || true
             echo "✅ Created release tag: $TAG_NAME"
           fi
