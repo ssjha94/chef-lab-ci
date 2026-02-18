@@ -243,16 +243,30 @@ jobs:
           echo "📤 Uploading ${{ steps.metadata.outputs.name }} v${{ steps.metadata.outputs.version }} to Chef Server..."
           echo "   Using --freeze (prevents accidental overwrites)"
           
-          # ✅ FIX #1: Removed --force flag for strict version enforcement
-          knife cookbook upload ${{ steps.metadata.outputs.name }} --freeze
+          # Debug: Check if credentials are configured
+          if [ -z "${{ secrets.CHEF_SERVER_URL }}" ]; then
+            echo "⚠️  WARNING: CHEF_SERVER_URL secret not configured"
+          fi
           
-          if [ $? -eq 0 ]; then
+          # ✅ FIX #1: Removed --force flag for strict version enforcement
+          if knife cookbook upload ${{ steps.metadata.outputs.name }} --freeze; then
             echo "✅ Upload successful and frozen (immutable)"
           else
-            echo "❌ Upload failed"
-            echo "   This cookbook version may already exist on the Chef Server"
-            echo "   Please bump the version in metadata.rb and try again"
-            exit 1
+            EXIT_CODE=$?
+            echo "❌ Upload failed with exit code $EXIT_CODE"
+            echo ""
+            echo "Possible causes:"
+            echo "  1. Chef Server credentials not configured in GitHub secrets"
+            echo "  2. Invalid CHEF_SERVER_URL, CHEF_ORG, CHEF_USER, or CHEF_USER_KEY"
+            echo "  3. Network connectivity issue to Chef Server"
+            echo "  4. User lacks permission to upload cookbooks"
+            echo ""
+            echo "Check that these secrets are set in GitHub:"
+            echo "  - CHEF_SERVER_URL"
+            echo "  - CHEF_ORG"
+            echo "  - CHEF_USER"
+            echo "  - CHEF_USER_KEY"
+            exit $EXIT_CODE
           fi
 
       - name: Verify Cookbook on Chef Server
