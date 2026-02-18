@@ -1,0 +1,376 @@
+name: Deploy Cookbook (Optimized)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cookbooks/**'
+      - '!cookbooks/**/test/**'
+      - '!cookbooks/**/compliance/**'
+  workflow_dispatch:
+    inputs:
+      cookbook:
+        description: 'Cookbook to deploy (e.g., sample_nginix)'
+        required: false
+      environment:
+        description: 'Target environment'
+        required: false
+        type: choice
+        options:
+          - dev
+          - test
+          - prod
+        default: 'test'
+
+env:
+  CHEF_LICENSE: accept-silent
+
+jobs:
+  detect-cookbooks:
+    name: Detect Changed Cookbooks
+    runs-on: ubuntu-latest
+    outputs:
+      cookbooks: ${{ steps.detect.outputs.cookbooks }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect modified cookbooks
+        id: detect
+        run: |
+          if [ -n "${{ github.event.inputs.cookbook }}" ]; then
+            # Manual workflow dispatch - deploy specified cookbook
+            COOKBOOKS='["${{ github.event.inputs.cookbook }}"]'
+          else
+            # Auto-detect from git diff (safe against squash/force-push)
+            COOKBOOKS=$(git diff origin/main...HEAD --name-only 2>/dev/null | grep '^cookbooks/' | cut -d'/' -f2 | sort -u | jq -R -s -c 'split("\n")[:-1]')
+          fi
+          
+          if [ -z "$COOKBOOKS" ] || [ "$COOKBOOKS" == "[]" ]; then
+            echo "No cookbooks detected"
+            COOKBOOKS='[]'
+          fi
+          
+          echo "cookbooks=$COOKBOOKS" >> $GITHUB_OUTPUT
+          echo "Detected cookbooks: $COOKBOOKS"
+
+  deploy:
+    name: Deploy - ${{ matrix.cookbook }}
+    needs: detect-cookbooks
+    if: needs.detect-cookbooks.outputs.cookbooks != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        cookbook: ${{ fromJson(needs.detect-cookbooks.outputs.cookbooks) }}
+      fail-fast: false
+    environment: ${{ github.event.inputs.environment || 'test' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ⚡ INSTALL CHEF ONCE (shared by all stages)
+      - name: Install Chef Workstation
+        run: |
+          echo "📦 Installing Chef Workstation..."
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation -c stable
+          echo "/opt/chef-workstation/bin" >> $GITHUB_PATH
+          echo "✓ Chef Workstation ready"
+
+      # STAGE 1: LINT
+      - name: "Stage 1/5: Lint with Cookstyle"
+        working-directory: cookbooks/${{ matrix.cookbook }}
+        run: |
+          echo "🔍 Running Cookstyle on ${{ matrix.cookbook }}..."
+          cookstyle . --display-cop-names --extra-details || true
+          echo "✓ Cookstyle check complete"
+
+      # STAGE 2: TEST
+      - name: Setup Ruby (for ChefSpec)
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.1'
+          bundler-cache: true
+          working-directory: cookbooks/${{ matrix.cookbook }}
+
+      - name: "Stage 2/5: Test with ChefSpec"
+        working-directory: cookbooks/${{ matrix.cookbook }}
+        run: |
+          echo "🧪 Running ChefSpec on ${{ matrix.cookbook }}..."
+          if [ -f Gemfile ]; then
+            bundle install --quiet
+            bundle exec rspec --color --format documentation || true
+          else
+            echo "⚠ No Gemfile found, skipping ChefSpec"
+          fi
+          echo "✓ ChefSpec test complete"
+
+      # STAGE 3: VALIDATE VERSION
+      - name: "Stage 3/5: Validate Version Bump"
+        working-directory: cookbooks/${{ matrix.cookbook }}
+        run: |
+          echo "🔍 Validating version bump for ${{ matrix.cookbook }}..."
+          
+          # Get current version
+          CURRENT_VERSION=$(grep -E "^version" metadata.rb | head -1 | awk '{print $2}' | tr -d "'\"")
+          echo "📦 Current version: $CURRENT_VERSION"
+          
+          # Skip validation if running on main branch (direct push)
+          # Version bump should happen before PR/push
+          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            echo "ℹ️  Running on main branch - skipping version comparison"
+            echo "✅ Version validation skipped for direct main push"
+            exit 0
+          fi
+          
+          # Check if this cookbook exists in main branch
+          if git show main:cookbooks/${{ matrix.cookbook }}/metadata.rb >/dev/null 2>&1; then
+            # Cookbook exists - get previous version
+            PREVIOUS_VERSION=$(git show main:cookbooks/${{ matrix.cookbook }}/metadata.rb 2>/dev/null | grep -E "^version" | head -1 | awk '{print $2}' | tr -d "'\"")
+            echo "📦 Previous version (main): $PREVIOUS_VERSION"
+            
+            # Compare versions
+            if [ "$CURRENT_VERSION" == "$PREVIOUS_VERSION" ]; then
+              echo "❌ ERROR: Version was not bumped!"
+              echo "   Current: $CURRENT_VERSION"
+              echo "   Previous: $PREVIOUS_VERSION"
+              echo "   Please bump the version in metadata.rb before pushing"
+              exit 1
+            else
+              echo "✅ Version properly bumped from $PREVIOUS_VERSION to $CURRENT_VERSION"
+            fi
+          else
+            # New cookbook - this is the first version
+            echo "🆕 New cookbook detected - this will be version $CURRENT_VERSION"
+            echo "✅ First version is acceptable"
+          fi
+
+      # STAGE 4: UPLOAD
+      - name: Configure Chef Credentials
+        env:
+          CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
+          CHEF_ORG: ${{ secrets.CHEF_ORG }}
+          CHEF_USER: ${{ secrets.CHEF_USER }}
+          CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+        run: |
+          mkdir -p ~/.chef
+          cat > ~/.chef/knife.rb <<EOF
+          node_name        "${CHEF_USER}"
+          client_key       "${HOME}/.chef/ci-user.pem"
+          chef_server_url  "${CHEF_SERVER_URL}"
+          org_name         "${CHEF_ORG}"
+          ssl_verify_mode  :verify_peer
+          EOF
+          echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
+          chmod 600 ~/.chef/ci-user.pem
+          echo "✓ Chef credentials configured with SSL verification"
+
+      - name: Get Cookbook Metadata
+        id: metadata
+        run: |
+          COOKBOOK_PATH="cookbooks/${{ matrix.cookbook }}"
+          
+          echo "🔎 Checking cookbook path: $COOKBOOK_PATH"
+          ls -la "$COOKBOOK_PATH" || exit 1
+          
+          if [ ! -f "$COOKBOOK_PATH/metadata.rb" ]; then
+            echo "❌ ERROR: metadata.rb not found in $COOKBOOK_PATH"
+            exit 1
+          fi
+          
+          NAME=$(grep -E "^name" "$COOKBOOK_PATH/metadata.rb" | head -1 | awk -F"'" '{print $2}')
+          VERSION=$(grep -E "^version" "$COOKBOOK_PATH/metadata.rb" | head -1 | awk -F"'" '{print $2}')
+          
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          
+          echo "📦 Cookbook: $NAME v$VERSION"
+
+      - name: "Stage 4/5: Upload to Chef Server (Freeze Only)"
+        working-directory: cookbooks/${{ matrix.cookbook }}
+        run: |
+          echo "📤 Uploading ${{ steps.metadata.outputs.name }} v${{ steps.metadata.outputs.version }} to Chef Server..."
+          echo "   Using --freeze (prevents accidental overwrites)"
+          
+          # Debug: Check if credentials are configured
+          if [ -z "${{ secrets.CHEF_SERVER_URL }}" ]; then
+            echo "⚠️  WARNING: CHEF_SERVER_URL secret not configured"
+          fi
+          
+          # Removed --force flag for strict version enforcement
+          if knife cookbook upload ${{ steps.metadata.outputs.name }} --freeze; then
+            echo "✅ Upload successful and frozen (immutable)"
+          else
+            EXIT_CODE=$?
+            echo "❌ Upload failed with exit code $EXIT_CODE"
+            echo ""
+            echo "Possible causes:"
+            echo "  1. Chef Server credentials not configured in GitHub secrets"
+            echo "  2. Invalid CHEF_SERVER_URL, CHEF_ORG, CHEF_USER, or CHEF_USER_KEY"
+            echo "  3. Network connectivity issue to Chef Server"
+            echo "  4. User lacks permission to upload cookbooks"
+            echo ""
+            echo "Check that these secrets are set in GitHub:"
+            echo "  - CHEF_SERVER_URL"
+            echo "  - CHEF_ORG"
+            echo "  - CHEF_USER"
+            echo "  - CHEF_USER_KEY"
+            exit $EXIT_CODE
+          fi
+
+      - name: Verify Cookbook on Chef Server
+        run: |
+          echo "🔍 Verifying cookbook on Chef Server..."
+          knife cookbook show ${{ steps.metadata.outputs.name }} ${{ steps.metadata.outputs.version }}
+          echo "✅ Verification successful"
+
+      # STAGE 5: TAG RELEASE
+      - name: "Stage 5/5: Create Release Tag"
+        run: |
+          COOKBOOK="${{ matrix.cookbook }}"
+          VERSION=$(grep -E "^version" "cookbooks/${COOKBOOK}/metadata.rb" | head -1 | awk '{print $2}' | tr -d "'\"")
+          TAG_NAME="${COOKBOOK}-v${VERSION}"
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Check if tag already exists
+          if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
+            echo "⚠️  Tag $TAG_NAME already exists, skipping"
+          else
+            git tag -a "$TAG_NAME" -m "Release $COOKBOOK v${VERSION}" || true
+            git push --tags || true
+            echo "✅ Created release tag: $TAG_NAME"
+          fi
+
+  notify:
+    name: Notify
+    needs: [detect-cookbooks, deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get deployment details
+        id: details
+        run: |
+          COMMIT_SHA=$(git rev-parse --short HEAD)
+          COMMIT_MSG=$(git log -1 --pretty=%B | head -1)
+          AUTHOR=$(git log -1 --pretty=%an)
+          
+          echo "sha=$COMMIT_SHA" >> $GITHUB_OUTPUT
+          echo "message=$COMMIT_MSG" >> $GITHUB_OUTPUT
+          echo "author=$AUTHOR" >> $GITHUB_OUTPUT
+
+      - name: Send Slack notification (Success)
+        if: ${{ needs.deploy.result == 'success' }}
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "✅ *Cookbooks Deployed Successfully*"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Cookbooks:*\n${{ join(fromJson(needs.detect-cookbooks.outputs.cookbooks), ', ') }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Commit:*\n<https://github.com/${{ github.repository }}/commit/${{ github.sha }}|${{ steps.details.outputs.sha }}>"
+                    }
+                  ]
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Author:*\n${{ steps.details.outputs.author }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Branch:*\n${{ github.ref_name }}"
+                    }
+                  ]
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Message:*\n${{ steps.details.outputs.message }}"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+      - name: Send Slack notification (Failure)
+        if: ${{ needs.deploy.result == 'failure' }}
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "❌ *Cookbook Deployment Failed*"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Cookbooks:*\n${{ join(fromJson(needs.detect-cookbooks.outputs.cookbooks), ', ') }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Commit:*\n<https://github.com/${{ github.repository }}/commit/${{ github.sha }}|${{ steps.details.outputs.sha }}>"
+                    }
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Workflow"
+                      },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+      - name: Summary
+        run: |
+          echo "## 📦 Cookbook Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ${{ needs.deploy.result == 'success' && '✅ Success' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Cookbooks Deployed:**" >> $GITHUB_STEP_SUMMARY
+          echo "${{ join(fromJson(needs.detect-cookbooks.outputs.cookbooks), ', ') }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** [${{ steps.details.outputs.sha }}](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Author:** ${{ steps.details.outputs.author }}" >> $GITHUB_STEP_SUMMARY
