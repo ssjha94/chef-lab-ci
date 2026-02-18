@@ -138,6 +138,14 @@ jobs:
           CURRENT_VERSION=$(grep -E "^version" metadata.rb | head -1 | awk '{print $2}' | tr -d "'\"")
           echo "📦 Current version: $CURRENT_VERSION"
           
+          # Skip validation if running on main branch (direct push)
+          # Version bump should happen before PR/push
+          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            echo "ℹ️  Running on main branch - skipping version comparison"
+            echo "✅ Version validation skipped for direct main push"
+            exit 0
+          fi
+          
           # Check if this cookbook exists in main branch
           if git show main:cookbooks/${{ matrix.cookbook }}/metadata.rb >/dev/null 2>&1; then
             # Cookbook exists - get previous version
