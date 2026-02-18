@@ -1,4 +1,4 @@
-name: Deploy Cookbook (Optimized)
+name: Deploy Cookbook v2
 
 on:
   push:
