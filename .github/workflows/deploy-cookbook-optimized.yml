@@ -208,7 +208,8 @@ jobs:
           fi
           
           # Removed --force flag for strict version enforcement
-          if knife cookbook upload ${{ steps.metadata.outputs.name }} --freeze; then
+          # Use --cookbook-path . so knife finds the cookbook in current directory
+          if knife cookbook upload ${{ steps.metadata.outputs.name }} --cookbook-path . --freeze; then
             echo "✅ Upload successful and frozen (immutable)"
           else
             EXIT_CODE=$?
