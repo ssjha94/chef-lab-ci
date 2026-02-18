@@ -201,10 +201,22 @@ jobs:
         id: metadata
         working-directory: cookbooks/${{ matrix.cookbook }}
         run: |
-          NAME=$(grep "^name" metadata.rb | awk -F"'" '{print $2}')
-          VERSION=$(grep "^version" metadata.rb | awk -F"'" '{print $2}')
+          NAME=$(grep -E "^name" metadata.rb | head -1 | awk -F"'" '{print $2}')
+          VERSION=$(grep -E "^version" metadata.rb | head -1 | awk -F"'" '{print $2}')
+          
+          # Debug output
+          echo "DEBUG: NAME='$NAME'"
+          echo "DEBUG: VERSION='$VERSION'"
+          
+          # Set outputs
           echo "name=$NAME" >> $GITHUB_OUTPUT
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          
+          if [ -z "$NAME" ]; then
+            echo "❌ ERROR: Could not extract cookbook name from metadata.rb"
+            exit 1
+          fi
+          
           echo "📦 Cookbook: $NAME v$VERSION"
 
       - name: Upload to Chef Server (Freeze Only - No Force)
