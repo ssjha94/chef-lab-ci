@@ -197,27 +197,45 @@ jobs:
           chmod 600 ~/.chef/ci-user.pem
           echo "✓ Chef credentials configured with SSL verification"
 
+      - name: Debug filesystem
+        run: |
+          echo "📂 Checking cookbook directory structure..."
+          echo "Matrix cookbook: '${{ matrix.cookbook }}'"
+          echo ""
+          echo "Contents of cookbooks/:"
+          ls -la cookbooks/ | head -20
+          echo ""
+          echo "Contents of cookbooks/${{ matrix.cookbook }}/:"
+          ls -la "cookbooks/${{ matrix.cookbook }}/" || echo "❌ Directory not found"
+
       - name: Get Cookbook Metadata
         id: metadata
         working-directory: cookbooks/${{ matrix.cookbook }}
         run: |
+          echo "🔍 Looking for metadata.rb in $(pwd)"
+          
+          if [ ! -f metadata.rb ]; then
+            echo "❌ ERROR: metadata.rb not found in $(pwd)"
+            echo "Contents of current directory:"
+            ls -la
+            exit 1
+          fi
+          
           NAME=$(grep -E "^name" metadata.rb | head -1 | awk -F"'" '{print $2}')
           VERSION=$(grep -E "^version" metadata.rb | head -1 | awk -F"'" '{print $2}')
-          
-          # Debug output
-          echo "DEBUG: NAME='$NAME'"
-          echo "DEBUG: VERSION='$VERSION'"
           
           # Set outputs
           echo "name=$NAME" >> $GITHUB_OUTPUT
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           
-          if [ -z "$NAME" ]; then
-            echo "❌ ERROR: Could not extract cookbook name from metadata.rb"
+          if [ -z "$NAME" ] || [ -z "$VERSION" ]; then
+            echo "❌ ERROR: Could not extract name or version from metadata.rb"
+            echo "Contents of metadata.rb:"
+            cat metadata.rb
             exit 1
           fi
           
-          echo "📦 Cookbook: $NAME v$VERSION"
+          echo "✅ Cookbook: $NAME v$VERSION"
 
       - name: Upload to Chef Server (Freeze Only - No Force)
         working-directory: cookbooks/${{ matrix.cookbook }}
