@@ -243,9 +243,18 @@ jobs:
           echo "📤 Uploading ${{ steps.metadata.outputs.name }} v${{ steps.metadata.outputs.version }} to Chef Server..."
           echo "   Using --freeze (prevents accidental overwrites)"
           
-          # Debug: Check if credentials are configured
-          if [ -z "${{ secrets.CHEF_SERVER_URL }}" ]; then
-            echo "⚠️  WARNING: CHEF_SERVER_URL secret not configured"
+          # Check if credentials are configured BEFORE attempting upload
+          if [ -z "${{ secrets.CHEF_SERVER_URL }}" ] || [ -z "${{ secrets.CHEF_USER_KEY }}" ]; then
+            echo "❌ ERROR: Chef Server credentials not configured in GitHub secrets!"
+            echo ""
+            echo "Required secrets:"
+            echo "  - CHEF_SERVER_URL"
+            echo "  - CHEF_ORG"
+            echo "  - CHEF_USER"
+            echo "  - CHEF_USER_KEY"
+            echo ""
+            echo "Configure these in: GitHub Settings → Secrets and variables → Actions"
+            exit 1
           fi
           
           # ✅ FIX #1: Removed --force flag for strict version enforcement
@@ -256,16 +265,10 @@ jobs:
             echo "❌ Upload failed with exit code $EXIT_CODE"
             echo ""
             echo "Possible causes:"
-            echo "  1. Chef Server credentials not configured in GitHub secrets"
-            echo "  2. Invalid CHEF_SERVER_URL, CHEF_ORG, CHEF_USER, or CHEF_USER_KEY"
-            echo "  3. Network connectivity issue to Chef Server"
-            echo "  4. User lacks permission to upload cookbooks"
-            echo ""
-            echo "Check that these secrets are set in GitHub:"
-            echo "  - CHEF_SERVER_URL"
-            echo "  - CHEF_ORG"
-            echo "  - CHEF_USER"
-            echo "  - CHEF_USER_KEY"
+            echo "  - Invalid CHEF_SERVER_URL, CHEF_ORG, CHEF_USER, or CHEF_USER_KEY"
+            echo "  - Network connectivity issue to Chef Server"
+            echo "  - User lacks permission to upload cookbooks"
+            echo "  - Cookbook already exists with same version"
             exit $EXIT_CODE
           fi
 
