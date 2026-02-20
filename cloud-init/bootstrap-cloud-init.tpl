@@ -16,36 +16,59 @@ write_files:
       NODE_NAME="__NODE_NAME__"
       S3_URI="__S3_URI__"
       RUN_LIST='__RUN_LIST__'
+      KNIFE=/opt/chef/bin/knife
       # ──────────────────────────────────────────────────────────────────────
 
-      # Install AWS CLI
+      # Install AWS CLI + chef (knife is bundled at /opt/chef/bin/knife)
       apt-get update -y
       apt-get install -y awscli
-
-      # Install chef-client
       curl -fsSL https://omnitruck.chef.io/install.sh | bash -s -- -P chef -c stable
 
       mkdir -p /etc/chef
       chmod 700 /etc/chef
 
-      # Fetch bootstrap client key from S3 (instance IAM role must allow s3:GetObject)
-      echo "Fetching client key from ${S3_URI}"
-      aws s3 cp "${S3_URI}" /etc/chef/client.pem
+      # ── Phase 1: Fetch bootstrap key and write a Phase-1 client.rb ────────
+      # bootstrap-client is the shared identity that owns the S3 key.
+      # It has ACLs on the clients + nodes containers on Chef Server.
+      echo "Fetching bootstrap client key from ${S3_URI}"
+      aws s3 cp "${S3_URI}" /etc/chef/bootstrap.pem
+      chmod 600 /etc/chef/bootstrap.pem
+
+      printf 'chef_server_url  "%s"\nnode_name        "bootstrap-client"\nclient_key       "/etc/chef/bootstrap.pem"\nchef_license     "accept-silent"\nssl_verify_mode  :verify_peer\n' \
+        "${CHEF_SERVER_URL}" > /etc/chef/bootstrap-client.rb
+
+      # ── Phase 2: Create a real per-node client + key on Chef Server ───────
+      # Use bootstrap-client credentials to mint a new client named ${NODE_NAME}
+      # and save its private key to /etc/chef/client.pem.
+      echo "Creating per-node client '${NODE_NAME}' on Chef Server..."
+      if ! $KNIFE client create "${NODE_NAME}" \
+          --config /etc/chef/bootstrap-client.rb \
+          --disable-editing \
+          --file /etc/chef/client.pem; then
+        # Client may exist from a previous attempt — reregister to get a fresh key
+        echo "Client already exists — reregistering to refresh key..."
+        $KNIFE client reregister "${NODE_NAME}" \
+          --config /etc/chef/bootstrap-client.rb \
+          --file /etc/chef/client.pem
+      fi
       chmod 600 /etc/chef/client.pem
+      echo "Per-node key for '${NODE_NAME}' saved to /etc/chef/client.pem"
 
-      # Write client.rb — Phase 1: authenticate as bootstrap-client (owner of S3 key)
-      # node_name in client.rb = client identity for Chef Server auth
-      # --node-name at runtime = node object name on Chef Server (separate concern)
-      printf 'chef_server_url  "%s"\nnode_name        "bootstrap-client"\nclient_key       "/etc/chef/client.pem"\nchef_license     "accept-silent"\nssl_verify_mode  :verify_peer\n' \
-        "${CHEF_SERVER_URL}" > /etc/chef/client.rb
+      # ── Phase 3: Switch to per-node identity ──────────────────────────────
+      # Now that ${NODE_NAME} has its own client + key, make it the permanent identity.
+      printf 'chef_server_url  "%s"\nnode_name        "%s"\nclient_key       "/etc/chef/client.pem"\nchef_license     "accept-silent"\nssl_verify_mode  :verify_peer\n' \
+        "${CHEF_SERVER_URL}" "${NODE_NAME}" > /etc/chef/client.rb
 
-      # Write first-boot.json — use printf to avoid heredoc indentation issues
+      # Shred bootstrap key — no longer needed on this node
+      shred -u /etc/chef/bootstrap.pem /etc/chef/bootstrap-client.rb
+      echo "Bootstrap credentials removed from disk."
+
+      # Write first-boot.json
       printf '{\n  "run_list": %s\n}\n' "${RUN_LIST}" > /etc/chef/first-boot.json
 
-      echo "=== Running chef-client ==="
-      # --node-name overrides node identity for the node object on Chef Server
-      # while node_name in client.rb handles authentication as bootstrap-client
-      chef-client --node-name "${NODE_NAME}" -j /etc/chef/first-boot.json
+      # ── Phase 4: Run chef-client as the real node ─────────────────────────
+      echo "=== Running chef-client as '${NODE_NAME}' ==="
+      chef-client -j /etc/chef/first-boot.json
 
       echo "=== Chef Bootstrap completed successfully at $(date) ==="
 
