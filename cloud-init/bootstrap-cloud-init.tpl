@@ -32,21 +32,21 @@ write_files:
 
       # Temporary config for first run (auth as bootstrap-client via -K)
       cat > /etc/chef/bootstrap-client.rb <<EOF
-chef_server_url          "${CHEF_SERVER_URL}"
-node_name                "${NODE_NAME}"
-client_key               "/etc/chef/client.pem"
-validation_client_name   "bootstrap-client"
-validation_key           "/etc/chef/bootstrap-client.pem"
-chef_license             "accept-silent"
-ssl_verify_mode          :verify_peer
-EOF
+      chef_server_url          "${CHEF_SERVER_URL}"
+      node_name                "${NODE_NAME}"
+      client_key               "/etc/chef/client.pem"
+      validation_client_name   "bootstrap-client"
+      validation_key           "/etc/chef/bootstrap-client.pem"
+      chef_license             "accept-silent"
+      ssl_verify_mode          :verify_peer
+      EOF
 
       # First-boot JSON
       cat > /etc/chef/first-boot.json <<EOF
-{
-  "run_list": ${RUN_LIST}
-}
-EOF
+      {
+        "run_list": ${RUN_LIST}
+      }
+      EOF
 
       echo "=== Running chef-client (validator-less via -K) as '${NODE_NAME}' ==="
       chef-client \
@@ -57,12 +57,12 @@ EOF
 
       # Permanent config (uses the per-node client.pem created above)
       cat > /etc/chef/client.rb <<EOF
-chef_server_url  "${CHEF_SERVER_URL}"
-node_name        "${NODE_NAME}"
-client_key       "/etc/chef/client.pem"
-chef_license     "accept-silent"
-ssl_verify_mode  :verify_peer
-EOF
+      chef_server_url  "${CHEF_SERVER_URL}"
+      node_name        "${NODE_NAME}"
+      client_key       "/etc/chef/client.pem"
+      chef_license     "accept-silent"
+      ssl_verify_mode  :verify_peer
+      EOF
 
       shred -u /etc/chef/bootstrap-client.pem /etc/chef/bootstrap-client.rb
       echo "Bootstrap credentials removed from disk."
