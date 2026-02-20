@@ -33,25 +33,19 @@ write_files:
       aws s3 cp "${S3_URI}" /etc/chef/client.pem
       chmod 600 /etc/chef/client.pem
 
-      # Write client.rb
-      cat > /etc/chef/client.rb <<CLIENTRB
-      chef_server_url  "${CHEF_SERVER_URL}"
-      node_name        "${NODE_NAME}"
-      client_name      "${NODE_NAME}"
-      client_key       "/etc/chef/client.pem"
-      chef_license     "accept-silent"
-      ssl_verify_mode  :verify_peer
-      CLIENTRB
+      # Write client.rb — authenticate as bootstrap-client (owner of the S3 key)
+      # node_name is passed via --node-name flag at runtime so Chef Server
+      # creates the node object under the correct name
+      printf 'chef_server_url  "%s"\nclient_name      "bootstrap-client"\nclient_key       "/etc/chef/client.pem"\nchef_license     "accept-silent"\nssl_verify_mode  :verify_peer\n' \
+        "${CHEF_SERVER_URL}" > /etc/chef/client.rb
 
-      # Write first-boot.json
-      cat > /etc/chef/first-boot.json <<FIRSTBOOT
-      {
-        "run_list": ${RUN_LIST}
-      }
-      FIRSTBOOT
+      # Write first-boot.json — use printf to avoid heredoc indentation issues
+      printf '{\n  "run_list": %s\n}\n' "${RUN_LIST}" > /etc/chef/first-boot.json
 
       echo "=== Running chef-client ==="
-      chef-client -j /etc/chef/first-boot.json
+      # --node-name overrides node identity for the node object on Chef Server
+      # while client_name in client.rb handles authentication as bootstrap-client
+      chef-client --node-name "${NODE_NAME}" -j /etc/chef/first-boot.json
 
       echo "=== Chef Bootstrap completed successfully at $(date) ==="
 
