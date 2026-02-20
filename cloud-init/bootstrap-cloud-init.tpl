@@ -1,47 +1,59 @@
 #cloud-config
 package_update: true
 
-runcmd:
-  - set -euo pipefail
-  - |
-    # Variables to replace (or use cloud-provider templating / user-data rendering)
-    CHEF_SERVER_URL="__CHEF_SERVER_URL__"
-    NODE_NAME="__NODE_NAME__"
-    S3_URI="__S3_URI__"    # e.g. s3://bucket/path/bootstrap-client.pem
-    RUN_LIST='__RUN_LIST__' # e.g. ["recipe[sample_nginx::default]"]
+write_files:
+  - path: /var/lib/cloud/scripts/per-once/chef-bootstrap.sh
+    permissions: '0755'
+    owner: root:root
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      exec > >(tee /var/log/chef-bootstrap.log) 2>&1
+      echo "=== Chef Bootstrap started at $(date) ==="
 
-    # Install awscli and chef-client
-    curl -L https://omnitruck.chef.io/install.sh | bash -s -- -P chef -c stable
-    apt-get update -y && apt-get install -y awscli
+      # ── Variables replaced at launch time ─────────────────────────────────
+      CHEF_SERVER_URL="__CHEF_SERVER_URL__"
+      NODE_NAME="__NODE_NAME__"
+      S3_URI="__S3_URI__"
+      RUN_LIST='__RUN_LIST__'
+      # ──────────────────────────────────────────────────────────────────────
 
-    mkdir -p /etc/chef
-    chmod 700 /etc/chef
+      # Install AWS CLI
+      apt-get update -y
+      apt-get install -y awscli
 
-    # Fetch client key from S3 (instance must have IAM role with read access)
-    if [ -n "$S3_URI" ]; then
-      echo "Fetching client key from $S3_URI"
-      aws s3 cp "$S3_URI" /etc/chef/client.pem
+      # Install chef-client
+      curl -fsSL https://omnitruck.chef.io/install.sh | bash -s -- -P chef -c stable
+
+      mkdir -p /etc/chef
+      chmod 700 /etc/chef
+
+      # Fetch bootstrap client key from S3 (instance IAM role must allow s3:GetObject)
+      echo "Fetching client key from ${S3_URI}"
+      aws s3 cp "${S3_URI}" /etc/chef/client.pem
       chmod 600 /etc/chef/client.pem
-    else
-      echo "ERROR: S3_URI not provided"
-      exit 1
-    fi
 
-    # Write client.rb
-    cat > /etc/chef/client.rb <<EOF
-    chef_server_url  "$CHEF_SERVER_URL"
-    node_name        "$NODE_NAME"
-    chef_license     "accept-silent"
-    EOF
+      # Write client.rb
+      cat > /etc/chef/client.rb <<CLIENTRB
+      chef_server_url  "${CHEF_SERVER_URL}"
+      node_name        "${NODE_NAME}"
+      client_name      "${NODE_NAME}"
+      client_key       "/etc/chef/client.pem"
+      chef_license     "accept-silent"
+      ssl_verify_mode  :verify_peer
+      CLIENTRB
 
-    # Write first-boot.json
-    cat > /etc/chef/first-boot.json <<EOF
-    {
-      "run_list": $RUN_LIST
-    }
-    EOF
+      # Write first-boot.json
+      cat > /etc/chef/first-boot.json <<FIRSTBOOT
+      {
+        "run_list": ${RUN_LIST}
+      }
+      FIRSTBOOT
 
-    # Run chef-client once
-    chef-client -j /etc/chef/first-boot.json --once
+      echo "=== Running chef-client ==="
+      chef-client -j /etc/chef/first-boot.json
 
-# End of template
+      echo "=== Chef Bootstrap completed successfully at $(date) ==="
+
+runcmd:
+  - bash /var/lib/cloud/scripts/per-once/chef-bootstrap.sh
