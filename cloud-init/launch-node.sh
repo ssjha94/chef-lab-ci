@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # launch-node.sh — Launch an EC2 instance and bootstrap it via cloud-init + Chef
 # Usage: ./launch-node.sh <node-name> [run-list]
-# Example: ./launch-node.sh web-node3 'recipe[sample_nginx::default]'
+# Example: ./launch-node.sh web-node3 'recipe[sample_nginix::default]'
 set -euo pipefail
 
 # ── Configuration (edit these if needed) ─────────────────────────────────────
@@ -19,7 +19,7 @@ TEMPLATE_FILE="$(dirname "$0")/bootstrap-cloud-init.tpl"
 # ─────────────────────────────────────────────────────────────────────────────
 
 NODE_NAME="${1:-}"
-RUN_LIST="${2:-recipe[sample_nginx::default]}"
+RUN_LIST="${2:-recipe[sample_nginix::default]}"
 
 if [[ -z "$NODE_NAME" ]]; then
   echo "ERROR: node name is required" >&2
