@@ -52,7 +52,10 @@ jobs:
           CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
         run: |
           mkdir -p ~/.chef
-          echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
+          # Remove any pre-existing credentials file — Chef Workstation auto-loads it
+          # and TOML-parses it before config.rb, causing parse errors on unquoted colons in URLs
+          rm -f ~/.chef/credentials
+          printf '%s' "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
           chmod 600 ~/.chef/ci-user.pem
           cat > ~/.chef/config.rb <<EOF
           chef_server_url  '${CHEF_SERVER_URL}'
@@ -60,6 +63,8 @@ jobs:
           client_key       '${HOME}/.chef/ci-user.pem'
           ssl_verify_mode  :verify_peer
           EOF
+          echo "--- config.rb written ---"
+          cat ~/.chef/config.rb
 
       - name: Validate inputs and required secrets
         run: |
@@ -106,6 +111,8 @@ jobs:
 
       - name: Create bootstrap client and save key
         id: create
+        env:
+          CHEF_CREDENTIALS_FILE: /dev/null
         run: |
           set -euo pipefail
           CLIENT_NAME="${{ github.event.inputs.client_name }}"
