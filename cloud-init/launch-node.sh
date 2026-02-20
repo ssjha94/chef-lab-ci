@@ -37,7 +37,8 @@ USER_DATA=$(sed \
   -e "s|__RUN_LIST__|[\"${RUN_LIST}\"]|g" \
   "$TEMPLATE_FILE")
 
-USERDATA_FILE=$(mktemp /tmp/cloud-init-XXXXXX.yaml)
+USERDATA_FILE=$(mktemp /tmp/cloud-init-XXXXXX)
+USERDATA_FILE="${USERDATA_FILE}.yaml"
 echo "$USER_DATA" > "$USERDATA_FILE"
 echo "==> cloud-init written to: $USERDATA_FILE"
 
