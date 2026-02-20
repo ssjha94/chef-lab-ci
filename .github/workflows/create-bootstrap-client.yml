@@ -1,0 +1,220 @@
+name: Create Bootstrap Client and Upload Key
+
+on:
+  workflow_dispatch:
+    inputs:
+      client_name:
+        description: 'Name of the bootstrap client (e.g., bootstrap-client)'
+        required: true
+        default: 'bootstrap-client'
+      store:
+        description: 'Where to store the private key'
+        required: true
+        default: 's3'
+        type: choice
+        options:
+          - s3
+          - vault
+      s3_bucket:
+        description: 'S3 bucket to upload key (when store=s3)'
+        required: false
+      s3_key_prefix:
+        description: 'S3 key prefix/folder (optional)'
+        required: false
+        default: ''
+      sse_kms_key_id:
+        description: 'Optional KMS Key Id to use for S3 server-side encryption (when store=s3)'
+        required: false
+      vault_path:
+        description: 'Vault KV path (when store=vault), e.g. secret/data/chef/bootstrap'
+        required: false
+
+env:
+  CHEF_LICENSE: accept-silent
+
+jobs:
+  create-client:
+    runs-on: ubuntu-latest
+    outputs:
+      key_location: ${{ steps.set-output.outputs.key_location }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Chef Workstation
+        run: |
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation -c stable
+          echo "/opt/chef-workstation/bin" >> $GITHUB_PATH
+
+      - name: Configure Chef credentials
+        env:
+          CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
+          CHEF_USER: ${{ secrets.CHEF_USER }}
+          CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+        run: |
+          mkdir -p ~/.chef
+          echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
+          chmod 600 ~/.chef/ci-user.pem
+          printf "[default]\nchef_server_url = %s\nclient_name = %s\nclient_key = %s\n" "${CHEF_SERVER_URL}" "${CHEF_USER}" "${HOME}/.chef/ci-user.pem" > ~/.chef/credentials
+
+      - name: Validate inputs and required secrets
+        run: |
+          set -euo pipefail
+          if [[ -z "${{ secrets.CHEF_SERVER_URL }}" ]]; then
+            echo "ERROR: CHEF_SERVER_URL secret is required" >&2
+            exit 1
+          fi
+          if [[ -z "${{ secrets.CHEF_USER }}" ]]; then
+            echo "ERROR: CHEF_USER secret is required" >&2
+            exit 1
+          fi
+          if [[ -z "${{ secrets.CHEF_USER_KEY }}" ]]; then
+            echo "ERROR: CHEF_USER_KEY secret is required" >&2
+            exit 1
+          fi
+
+      - name: Validate KMS key ID format (if provided)
+        if: ${{ github.event.inputs.sse_kms_key_id != '' && github.event.inputs.store == 's3' }}
+        run: |
+          set -euo pipefail
+          KMS_ID="${{ github.event.inputs.sse_kms_key_id }}"
+          # KMS IDs can be UUID or full ARN - warn only, never fail on format
+          if [[ ! "$KMS_ID" =~ ^(arn:aws:kms:[a-z0-9-]+:[0-9]{12}:(key|alias)/[a-zA-Z0-9/_-]+|[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$ ]]; then
+            echo "WARNING: KMS key ID format looks unusual (expected UUID or ARN format). Proceeding anyway." >&2
+          else
+            echo "KMS key ID format validated OK"
+          fi
+
+      - name: Validate Vault path format
+        if: ${{ github.event.inputs.store == 'vault' }}
+        run: |
+          set -euo pipefail
+          VAULT_PATH="${{ github.event.inputs.vault_path }}"
+          if [[ -z "$VAULT_PATH" ]]; then
+            echo "ERROR: vault_path input is required when store=vault" >&2
+            exit 1
+          fi
+          if [[ ! "$VAULT_PATH" =~ ^[a-zA-Z0-9_/.-]+$ ]]; then
+            echo "ERROR: Invalid Vault path format. Use only alphanumeric characters, dashes, underscores, dots, and slashes." >&2
+            exit 1
+          fi
+          echo "Vault path format OK: $VAULT_PATH"
+
+      - name: Create bootstrap client and save key
+        id: create
+        run: |
+          set -euo pipefail
+          CLIENT_NAME="${{ github.event.inputs.client_name }}"
+          OUTFILE="${CLIENT_NAME}.pem"
+
+          # Fail if client already exists to avoid accidental reuse
+          if knife client list | grep -q "^${CLIENT_NAME}$"; then
+            echo "ERROR: Client ${CLIENT_NAME} already exists" >&2
+            exit 1
+          fi
+
+          # Create client and write private key to file
+          knife client create "${CLIENT_NAME}" --file "${OUTFILE}"
+
+          echo "created_key=${OUTFILE}" >> $GITHUB_OUTPUT
+
+      - name: Verify S3 bucket exists and is accessible
+        if: ${{ github.event.inputs.store == 's3' }}
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+          BUCKET="${{ github.event.inputs.s3_bucket }}"
+          if [ -z "$BUCKET" ]; then
+            echo "ERROR: s3_bucket input is required when store=s3" >&2
+            exit 1
+          fi
+          command -v aws || (sudo apt-get update -y && sudo apt-get install -y awscli)
+          if ! aws s3 ls "s3://$BUCKET" > /dev/null 2>&1; then
+            echo "ERROR: Bucket $BUCKET does not exist or is not accessible" >&2
+            exit 1
+          fi
+          echo "S3 bucket $BUCKET is accessible"
+
+      - name: Upload key to S3 (if selected)
+        id: upload
+        if: ${{ github.event.inputs.store == 's3' }}
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          set -euo pipefail
+          OUTFILE="${{ steps.create.outputs.created_key }}"
+          BUCKET="${{ github.event.inputs.s3_bucket }}"
+          PREFIX="${{ github.event.inputs.s3_key_prefix }}"
+          if [ -z "$BUCKET" ]; then
+            echo "ERROR: s3_bucket input is required when store=s3" >&2
+            exit 1
+          fi
+          KEY_NAME="${PREFIX%/}/${OUTFILE}"
+          KEY_NAME=${KEY_NAME#/}
+          echo "Uploading $OUTFILE to s3://$BUCKET/$KEY_NAME"
+          command -v aws || (sudo apt-get update -y && sudo apt-get install -y awscli)
+          aws --version
+          # Use AES256 by default or KMS if provided
+          if [ -n "${{ github.event.inputs.sse_kms_key_id }}" ]; then
+            aws s3 cp "$OUTFILE" "s3://$BUCKET/$KEY_NAME" --sse aws:kms --sse-kms-key-id "${{ github.event.inputs.sse_kms_key_id }}"
+          else
+            aws s3 cp "$OUTFILE" "s3://$BUCKET/$KEY_NAME" --sse AES256
+          fi
+          echo "key_uri=s3://$BUCKET/$KEY_NAME" >> $GITHUB_OUTPUT
+
+      - name: Upload key to Vault (if selected)
+        id: upload_vault
+        if: ${{ github.event.inputs.store == 'vault' }}
+        env:
+          VAULT_ADDR: ${{ secrets.VAULT_ADDR }}
+          VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
+        run: |
+          set -euo pipefail
+          OUTFILE="${{ steps.create.outputs.created_key }}"
+          VAULT_PATH="${{ github.event.inputs.vault_path }}"
+          if [ -z "$VAULT_PATH" ]; then
+            echo "ERROR: vault_path input is required when store=vault" >&2
+            exit 1
+          fi
+          curl --version || true
+          # install vault cli
+          sudo apt-get update -y && sudo apt-get install -y unzip
+          curl -fsSL https://releases.hashicorp.com/vault/1.14.4/vault_1.14.4_linux_amd64.zip -o vault.zip
+          unzip vault.zip
+          sudo mv vault /usr/local/bin/
+          chmod +x /usr/local/bin/vault
+
+          # write as kv v2 compatible path using env token/address
+          VAULT_ADDR="${VAULT_ADDR}" VAULT_TOKEN="${VAULT_TOKEN}" /usr/local/bin/vault kv put "${VAULT_PATH}" key=@"${OUTFILE}"
+          echo "key_uri=vault:${VAULT_PATH}" >> $GITHUB_OUTPUT
+
+      - name: Clean up local key file
+        if: always()
+        run: |
+          set -euo pipefail
+          OUTFILE="${{ steps.create.outputs.created_key }}"
+          if [ -f "$OUTFILE" ]; then
+            shred -u "$OUTFILE" || rm -f "$OUTFILE"
+          fi
+
+      - name: Set combined key location output
+        id: set-output
+        if: always()
+        run: |
+          set -euo pipefail
+          S3_URI="${{ steps.upload.outputs.key_uri }}"
+          VAULT_URI="${{ steps.upload_vault.outputs.key_uri }}"
+          if [ -n "$S3_URI" ]; then
+            echo "key_location=$S3_URI" >> $GITHUB_OUTPUT
+          elif [ -n "$VAULT_URI" ]; then
+            echo "key_location=$VAULT_URI" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Output
+        run: |
+          echo "Bootstrap client created: ${{ github.event.inputs.client_name }}"
+          echo "Key location: ${{ steps.set-output.outputs.key_location }}"
