@@ -54,7 +54,12 @@ jobs:
           mkdir -p ~/.chef
           echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
           chmod 600 ~/.chef/ci-user.pem
-          printf "[default]\nchef_server_url = %s\nclient_name = %s\nclient_key = %s\n" "${CHEF_SERVER_URL}" "${CHEF_USER}" "${HOME}/.chef/ci-user.pem" > ~/.chef/credentials
+          cat > ~/.chef/config.rb <<EOF
+          chef_server_url  '${CHEF_SERVER_URL}'
+          node_name        '${CHEF_USER}'
+          client_key       '${HOME}/.chef/ci-user.pem'
+          ssl_verify_mode  :verify_peer
+          EOF
 
       - name: Validate inputs and required secrets
         run: |
