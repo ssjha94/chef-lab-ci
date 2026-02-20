@@ -124,8 +124,8 @@ jobs:
             exit 1
           fi
 
-          # Create client and write private key to file
-          knife client create "${CLIENT_NAME}" --file "${OUTFILE}"
+          # Create client and write private key to file (--disable-editing skips opening $EDITOR in CI)
+          knife client create "${CLIENT_NAME}" --disable-editing --file "${OUTFILE}"
 
           echo "created_key=${OUTFILE}" >> $GITHUB_OUTPUT
 
