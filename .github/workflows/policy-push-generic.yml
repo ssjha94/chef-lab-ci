@@ -91,7 +91,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: policy-lock
-          path: .
+          path: ${{ env.COOKBOOK_PATH }}
 
       - name: Install Chef Workstation
         run: |
@@ -139,7 +139,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: policy-lock
-          path: .
+          path: ${{ env.COOKBOOK_PATH }}
 
       - name: Install Chef Workstation
         run: |
@@ -187,7 +187,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: policy-lock
-          path: .
+          path: ${{ env.COOKBOOK_PATH }}
 
       - name: Install Chef Workstation
         run: |
