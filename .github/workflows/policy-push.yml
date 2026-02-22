@@ -16,6 +16,7 @@ on:
 
 env:
   CHEF_LICENSE: accept-no-persist
+  CHEF_WORKSTATION_VERSION: 25.12.1102-1
 
 jobs:
   build-lock:
@@ -36,7 +37,7 @@ jobs:
 
       - name: Install Chef Workstation
         run: |
-          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation -v ${CHEF_WORKSTATION_VERSION}
 
       - name: Configure Chef credentials
         run: |
@@ -85,7 +86,7 @@ jobs:
 
       - name: Install Chef Workstation
         run: |
-          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation -v ${CHEF_WORKSTATION_VERSION}
 
       - name: Configure Chef credentials
         run: |
@@ -132,7 +133,7 @@ jobs:
 
       - name: Install Chef Workstation
         run: |
-          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation -v ${CHEF_WORKSTATION_VERSION}
 
       - name: Configure Chef credentials
         run: |
@@ -179,7 +180,7 @@ jobs:
 
       - name: Install Chef Workstation
         run: |
-          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation -v ${CHEF_WORKSTATION_VERSION}
 
       - name: Configure Chef credentials
         run: |
@@ -215,7 +216,7 @@ jobs:
     steps:
       - name: Install Chef Workstation
         run: |
-          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation -v ${CHEF_WORKSTATION_VERSION}
 
       - name: Configure Chef credentials
         run: |
