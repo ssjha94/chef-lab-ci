@@ -16,7 +16,7 @@ on:
       converge_query:
         description: "Knife search query for converge (e.g., policy_group:prod-full or name:web-node1)"
         required: false
-        default: "policy_group:prod-full"
+        default: "chef_environment:prod"
         type: string
 
 env:
