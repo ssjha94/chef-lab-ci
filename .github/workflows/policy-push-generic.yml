@@ -254,6 +254,18 @@ jobs:
           chmod 600 ~/.ssh/ec2.pem
           printf "Host *\n  StrictHostKeyChecking accept-new\n" > ~/.ssh/config
 
+      - name: Assign policy to nodes
+        run: |
+          nodes=$(knife search node "${{ inputs.converge_query }}" -i | tail -n +2)
+          if [ -z "$nodes" ]; then
+            echo "No nodes matched converge_query; skipping assignment"
+            exit 0
+          fi
+          for node in $nodes; do
+            echo "Assigning policy ${{ inputs.cookbook }} to $node in prod-full"
+            knife node policy set "$node" "${{ inputs.cookbook }}" "prod-full"
+          done
+
       - name: Converge target nodes
         run: |
           knife ssh "${{ inputs.converge_query }}" "sudo chef-client" \
