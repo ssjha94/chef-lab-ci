@@ -52,7 +52,6 @@ jobs:
           org_name         ENV['CHEF_ORG'] if ENV['CHEF_ORG']
 
       - name: Install SSH key
-        env:
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
@@ -64,11 +63,9 @@ jobs:
           echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
           chmod 600 ~/.chef/ci-user.pem
 
-      - name: Build Policyfile.lock
-        run: chef install Policyfile.rb
-
       - name: Upload lock artifact
         uses: actions/upload-artifact@v4
+                    ssl_verify_mode  (ENV['CHEF_SSL_VERIFY'] || ':verify_peer')
         with:
           name: policy-lock
           path: cookbooks/sample_nginix/Policyfile.lock.json
