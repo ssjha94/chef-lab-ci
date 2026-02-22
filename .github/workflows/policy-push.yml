@@ -29,6 +29,7 @@ jobs:
       CHEF_ORG: ${{ secrets.CHEF_ORG }}
       CHEF_USER: ${{ secrets.CHEF_USER }}
       CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+      SSH_USER: ${{ secrets.SSH_USER }}
       CHEF_SSL_VERIFY: ${{ secrets.CHEF_SSL_VERIFY }}
     steps:
       - name: Checkout
@@ -43,9 +44,21 @@ jobs:
           mkdir -p ~/.chef
           cat > ~/.chef/knife.rb <<'EOF'
           chef_server_url  ENV['CHEF_SERVER_URL']
+          knife[:ssh_user] = ENV['SSH_USER'] || 'ubuntu'
+          knife[:identity_file] = File.join(ENV['HOME'], '.ssh', 'ec2.pem')
+          knife[:ssh_verify_host_key] = :never
           node_name        ENV['CHEF_USER']
           client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
           org_name         ENV['CHEF_ORG'] if ENV['CHEF_ORG']
+
+      - name: Install SSH key
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "${EC2_SSH_KEY}" > ~/.ssh/ec2.pem
+          chmod 600 ~/.ssh/ec2.pem
+          printf "Host *\n  StrictHostKeyChecking accept-new\n" > ~/.ssh/config
           ssl_verify_mode  (ENV['CHEF_SSL_VERIFY'] || ':verify_peer')
           EOF
           echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
