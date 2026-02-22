@@ -207,7 +207,7 @@ jobs:
     needs: push-full
     defaults:
       run:
-        working-directory: cookbooks/sample_nginix
+        working-directory: cookbooks
     env:
       CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
       CHEF_ORG: ${{ secrets.CHEF_ORG }}
