@@ -21,6 +21,9 @@ jobs:
   build-lock:
     name: Build Policyfile Lock
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cookbooks
     env:
       CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
       CHEF_ORG: ${{ secrets.CHEF_ORG }}
@@ -55,12 +58,15 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: policy-lock
-          path: Policyfile.lock.json
+          path: cookbooks/Policyfile.lock.json
 
   push-canary:
     name: Push prod-canary
     runs-on: ubuntu-latest
     needs: build-lock
+    defaults:
+      run:
+        working-directory: cookbooks
     env:
       CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
       CHEF_ORG: ${{ secrets.CHEF_ORG }}
@@ -75,6 +81,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: policy-lock
+          path: .
 
       - name: Install Chef Workstation
         run: |
@@ -104,6 +111,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: push-canary
     environment: prod-wave1
+    defaults:
+      run:
+        working-directory: cookbooks
     env:
       CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
       CHEF_ORG: ${{ secrets.CHEF_ORG }}
@@ -118,6 +128,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: policy-lock
+          path: .
 
       - name: Install Chef Workstation
         run: |
@@ -147,6 +158,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: push-wave1
     environment: prod-full
+    defaults:
+      run:
+        working-directory: cookbooks
     env:
       CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
       CHEF_ORG: ${{ secrets.CHEF_ORG }}
@@ -161,6 +175,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: policy-lock
+          path: .
 
       - name: Install Chef Workstation
         run: |
@@ -190,6 +205,9 @@ jobs:
     if: ${{ inputs.run_converge }}
     runs-on: ubuntu-latest
     needs: push-full
+    defaults:
+      run:
+        working-directory: cookbooks
     env:
       CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
       CHEF_ORG: ${{ secrets.CHEF_ORG }}
