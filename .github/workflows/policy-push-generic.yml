@@ -312,6 +312,7 @@ jobs:
           if [ "${#nodes[@]}" -eq 0 ]; then
             echo "No target nodes resolved from target_nodes/converge_query; skipping assignment and converge"
             echo "target_nodes=" >> "$GITHUB_OUTPUT"
+            echo "target_query=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -322,32 +323,25 @@ jobs:
 
           target_nodes_csv="$(IFS=,; echo "${nodes[*]}")"
           echo "target_nodes=${target_nodes_csv}" >> "$GITHUB_OUTPUT"
+          if [ -n "${TARGET_NODES_INPUT:-}" ]; then
+            target_query="$(printf 'name:%s OR ' "${nodes[@]}")"
+            target_query="${target_query% OR }"
+          else
+            target_query="${query}"
+          fi
+          echo "target_query=${target_query}" >> "$GITHUB_OUTPUT"
 
       - name: Converge target nodes
-        if: ${{ steps.assign.outputs.target_nodes != '' }}
+        if: ${{ steps.assign.outputs.target_query != '' }}
         run: |
-          set -euo pipefail
-          IFS=',' read -r -a target_nodes <<< "${{ steps.assign.outputs.target_nodes }}"
-          for node in "${target_nodes[@]}"; do
-            node_json="$(knife node show "${node}" -F json)"
-            node_host="$(printf '%s' "${node_json}" | ruby -rjson -e 'j=JSON.parse(STDIN.read); host=j.dig("automatic","cloud","public_ipv4") || j.dig("automatic","ipaddress") || j["ipaddress"] || j.dig("automatic","fqdn") || j["fqdn"] || ""; puts host')"
-            if [ -z "${node_host}" ]; then
-              echo "Could not determine SSH address for node ${node}"
-              exit 1
-            fi
-
-            echo "Converging ${node} via ${node_host}"
-            ssh \
-              -o BatchMode=yes \
-              -o ConnectTimeout=20 \
-              -o StrictHostKeyChecking=accept-new \
-              -i "$HOME/.ssh/ec2.pem" \
-              "${SSH_USER:-ubuntu}@${node_host}" \
-              "sudo chef-client"
-          done
+          knife ssh "${{ steps.assign.outputs.target_query }}" "sudo chef-client" \
+            --ssh-user "${SSH_USER:-ubuntu}" \
+            --ssh-identity-file ~/.ssh/ec2.pem \
+            --attribute cloud.public_ipv4 \
+            --no-host-key-verify
 
       - name: Skip converge (no target nodes)
-        if: ${{ steps.assign.outputs.target_nodes == '' }}
+        if: ${{ steps.assign.outputs.target_query == '' }}
         run: echo "No target nodes found from assignment step; skipping converge"
 
       - name: Report attached policy revisions
