@@ -243,8 +243,20 @@ jobs:
           chmod 600 ~/.ssh/ec2.pem
           printf "Host *\n  StrictHostKeyChecking accept-new\n" > ~/.ssh/config
 
-      - name: Converge target nodes
-        run: knife ssh "${{ inputs.converge_query }}" "sudo chef-client"
+      - name: Inspect node addresses
+        run: |
+          knife search node "${{ inputs.converge_query }}" \
+            -a fqdn \
+            -a ipaddress \
+            -a cloud.public_ipv4
+
+      - name: Converge target nodes (forced)
+        run: |
+          knife ssh "${{ inputs.converge_query }}" "sudo chef-client" \
+            --ssh-user ubuntu \
+            --identity-file ~/.ssh/ec2.pem \
+            --attribute cloud.public_ipv4 \
+            --ssh-verify-host-key never
 
       - name: Report attached policy revisions
         run: knife search node "${{ inputs.converge_query }}" -a policy_name -a policy_group -a policy_revision
