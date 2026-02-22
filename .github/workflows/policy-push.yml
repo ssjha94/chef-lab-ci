@@ -14,6 +14,9 @@ on:
         default: "policy_group:prod-full"
         type: string
 
+env:
+  CHEF_LICENSE: accept-no-persist
+
 jobs:
   build-lock:
     name: Build Policyfile Lock
