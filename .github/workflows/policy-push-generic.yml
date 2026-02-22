@@ -304,8 +304,13 @@ jobs:
         run: echo "No target nodes found from assignment step; skipping converge"
 
       - name: Report attached policy revisions
+        if: ${{ steps.assign.outputs.target_nodes != '' }}
         env:
           REPORT_QUERY: ${{ inputs.converge_query }}
         run: |
           query="${REPORT_QUERY:-policy_group:prod-full}"
           knife search node "${query}" -a policy_name -a policy_group -a policy_revision
+
+      - name: Skip policy revision report (no target nodes)
+        if: ${{ steps.assign.outputs.target_nodes == '' }}
+        run: echo "No target nodes found from assignment step; skipping policy revision report"
