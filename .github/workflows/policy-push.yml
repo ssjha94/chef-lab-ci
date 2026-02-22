@@ -254,7 +254,7 @@ jobs:
         run: |
           knife ssh "${{ inputs.converge_query }}" "sudo chef-client" \
             --ssh-user ubuntu \
-            --identity-file ~/.ssh/ec2.pem \
+            --ssh-identity-file ~/.ssh/ec2.pem \
             --attribute cloud.public_ipv4 \
             --ssh-verify-host-key never
 
