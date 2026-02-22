@@ -1,0 +1,268 @@
+name: Chef Policy Promotion (Generic)
+
+on:
+  workflow_dispatch:
+    inputs:
+      cookbook:
+        description: "Cookbook directory under cookbooks/"
+        required: true
+        default: "sample_nginix"
+        type: string
+      run_converge:
+        description: "Run converge/verify after pushing to prod-full"
+        required: false
+        default: false
+        type: boolean
+      converge_query:
+        description: "Knife search query for converge (e.g., policy_group:prod-full or name:web-node1)"
+        required: false
+        default: "policy_group:prod-full"
+        type: string
+
+env:
+  CHEF_LICENSE: accept-no-persist
+  CHEF_WORKSTATION_VERSION: 25.12.1102-1
+
+jobs:
+  build-lock:
+    name: Build Policyfile Lock
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cookbooks/${{ inputs.cookbook }}
+    env:
+      CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
+      CHEF_ORG: ${{ secrets.CHEF_ORG }}
+      CHEF_USER: ${{ secrets.CHEF_USER }}
+      CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+      CHEF_SSL_VERIFY: ${{ secrets.CHEF_SSL_VERIFY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate cookbook input
+        run: |
+          test -d "cookbooks/${{ inputs.cookbook }}"
+          test -f "cookbooks/${{ inputs.cookbook }}/Policyfile.rb"
+
+      - name: Install Chef Workstation
+        run: |
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation -v ${CHEF_WORKSTATION_VERSION}
+
+      - name: Configure Chef credentials
+        run: |
+          mkdir -p ~/.chef
+          cat > ~/.chef/knife.rb <<'EOF'
+          chef_server_url  ENV['CHEF_SERVER_URL']
+          node_name        ENV['CHEF_USER']
+          client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
+          org_name         ENV['CHEF_ORG'] if ENV['CHEF_ORG']
+          ssl_verify_mode  (ENV['CHEF_SSL_VERIFY'] || ':verify_peer')
+          knife[:ssh_attribute] = 'cloud.public_ipv4'
+          EOF
+          echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
+          chmod 600 ~/.chef/ci-user.pem
+
+      - name: Build Policyfile.lock
+        run: chef install Policyfile.rb
+
+      - name: Upload lock artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: policy-lock
+          path: cookbooks/${{ inputs.cookbook }}/Policyfile.lock.json
+
+  push-canary:
+    name: Push prod-canary
+    runs-on: ubuntu-latest
+    needs: build-lock
+    defaults:
+      run:
+        working-directory: cookbooks/${{ inputs.cookbook }}
+    env:
+      CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
+      CHEF_ORG: ${{ secrets.CHEF_ORG }}
+      CHEF_USER: ${{ secrets.CHEF_USER }}
+      CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+      CHEF_SSL_VERIFY: ${{ secrets.CHEF_SSL_VERIFY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download lock artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: policy-lock
+          path: .
+
+      - name: Install Chef Workstation
+        run: |
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation -v ${CHEF_WORKSTATION_VERSION}
+
+      - name: Configure Chef credentials
+        run: |
+          mkdir -p ~/.chef
+          cat > ~/.chef/knife.rb <<'EOF'
+          chef_server_url  ENV['CHEF_SERVER_URL']
+          node_name        ENV['CHEF_USER']
+          client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
+          org_name         ENV['CHEF_ORG'] if ENV['CHEF_ORG']
+          ssl_verify_mode  (ENV['CHEF_SSL_VERIFY'] || ':verify_peer')
+          knife[:ssh_attribute] = 'cloud.public_ipv4'
+          EOF
+          echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
+          chmod 600 ~/.chef/ci-user.pem
+
+      - name: Rehydrate cookbook cache from lock
+        run: chef install Policyfile.lock.json --no-deps
+
+      - name: Push policy to prod-canary
+        run: chef push prod-canary Policyfile.lock.json
+
+  push-wave1:
+    name: Push prod-wave1
+    runs-on: ubuntu-latest
+    needs: push-canary
+    environment: prod-wave1
+    defaults:
+      run:
+        working-directory: cookbooks/${{ inputs.cookbook }}
+    env:
+      CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
+      CHEF_ORG: ${{ secrets.CHEF_ORG }}
+      CHEF_USER: ${{ secrets.CHEF_USER }}
+      CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+      CHEF_SSL_VERIFY: ${{ secrets.CHEF_SSL_VERIFY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download lock artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: policy-lock
+          path: .
+
+      - name: Install Chef Workstation
+        run: |
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation -v ${CHEF_WORKSTATION_VERSION}
+
+      - name: Configure Chef credentials
+        run: |
+          mkdir -p ~/.chef
+          cat > ~/.chef/knife.rb <<'EOF'
+          chef_server_url  ENV['CHEF_SERVER_URL']
+          node_name        ENV['CHEF_USER']
+          client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
+          org_name         ENV['CHEF_ORG'] if ENV['CHEF_ORG']
+          ssl_verify_mode  (ENV['CHEF_SSL_VERIFY'] || ':verify_peer')
+          knife[:ssh_attribute] = 'cloud.public_ipv4'
+          EOF
+          echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
+          chmod 600 ~/.chef/ci-user.pem
+
+      - name: Rehydrate cookbook cache from lock
+        run: chef install Policyfile.lock.json --no-deps
+
+      - name: Push policy to prod-wave1
+        run: chef push prod-wave1 Policyfile.lock.json
+
+  push-full:
+    name: Push prod-full
+    runs-on: ubuntu-latest
+    needs: push-wave1
+    environment: prod-full
+    defaults:
+      run:
+        working-directory: cookbooks/${{ inputs.cookbook }}
+    env:
+      CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
+      CHEF_ORG: ${{ secrets.CHEF_ORG }}
+      CHEF_USER: ${{ secrets.CHEF_USER }}
+      CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+      CHEF_SSL_VERIFY: ${{ secrets.CHEF_SSL_VERIFY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download lock artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: policy-lock
+          path: .
+
+      - name: Install Chef Workstation
+        run: |
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation -v ${CHEF_WORKSTATION_VERSION}
+
+      - name: Configure Chef credentials
+        run: |
+          mkdir -p ~/.chef
+          cat > ~/.chef/knife.rb <<'EOF'
+          chef_server_url  ENV['CHEF_SERVER_URL']
+          node_name        ENV['CHEF_USER']
+          client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
+          org_name         ENV['CHEF_ORG'] if ENV['CHEF_ORG']
+          ssl_verify_mode  (ENV['CHEF_SSL_VERIFY'] || ':verify_peer')
+          knife[:ssh_attribute] = 'cloud.public_ipv4'
+          EOF
+          echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
+          chmod 600 ~/.chef/ci-user.pem
+
+      - name: Rehydrate cookbook cache from lock
+        run: chef install Policyfile.lock.json --no-deps
+
+      - name: Push policy to prod-full
+        run: chef push prod-full Policyfile.lock.json
+
+  converge:
+    name: Optional converge/verify
+    if: ${{ inputs.run_converge }}
+    runs-on: ubuntu-latest
+    needs: push-full
+    env:
+      CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
+      CHEF_ORG: ${{ secrets.CHEF_ORG }}
+      CHEF_USER: ${{ secrets.CHEF_USER }}
+      CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+      CHEF_SSL_VERIFY: ${{ secrets.CHEF_SSL_VERIFY }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+    steps:
+      - name: Install Chef Workstation
+        run: |
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation -v ${CHEF_WORKSTATION_VERSION}
+
+      - name: Configure Chef credentials
+        run: |
+          mkdir -p ~/.chef
+          cat > ~/.chef/knife.rb <<'EOF'
+          chef_server_url  ENV['CHEF_SERVER_URL']
+          knife[:ssh_user] = ENV['SSH_USER'] || 'ubuntu'
+          knife[:identity_file] = File.join(ENV['HOME'], '.ssh', 'ec2.pem')
+          knife[:ssh_attribute] = 'cloud.public_ipv4'
+          knife[:ssh_verify_host_key] = :never
+          node_name        ENV['CHEF_USER']
+          client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
+          org_name         ENV['CHEF_ORG'] if ENV['CHEF_ORG']
+          ssl_verify_mode  (ENV['CHEF_SSL_VERIFY'] || ':verify_peer')
+          EOF
+          echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
+          chmod 600 ~/.chef/ci-user.pem
+
+      - name: Install SSH key
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "${EC2_SSH_KEY}" > ~/.ssh/ec2.pem
+          chmod 600 ~/.ssh/ec2.pem
+          printf "Host *\n  StrictHostKeyChecking accept-new\n" > ~/.ssh/config
+
+      - name: Converge target nodes
+        run: |
+          knife ssh "${{ inputs.converge_query }}" "sudo chef-client" \
+            --attribute cloud.public_ipv4 \
+            --no-host-key-verify
+
+      - name: Report attached policy revisions
+        run: knife search node "${{ inputs.converge_query }}" -a policy_name -a policy_group -a policy_revision
