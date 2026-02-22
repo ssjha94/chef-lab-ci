@@ -270,7 +270,8 @@ jobs:
         run: |
           knife ssh "${{ inputs.converge_query }}" "sudo chef-client" \
             -x "${SSH_USER:-ubuntu}" \
-            -i "$HOME/.ssh/ec2.pem"
+            -i "$HOME/.ssh/ec2.pem" \
+            --attribute cloud.public_ipv4
 
       - name: Report attached policy revisions
         run: knife search node "${{ inputs.converge_query }}" -a policy_name -a policy_group -a policy_revision
