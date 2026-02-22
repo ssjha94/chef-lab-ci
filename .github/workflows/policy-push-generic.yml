@@ -256,7 +256,7 @@ jobs:
 
       - name: Assign policy to nodes
         run: |
-          nodes=$(knife search node "${{ inputs.converge_query }}" -i | tail -n +2)
+          nodes=$(knife search node "${{ inputs.converge_query }}" -i | sed '/items found/d' | sed '/^$/d')
           if [ -z "$nodes" ]; then
             echo "No nodes matched converge_query; skipping assignment"
             exit 0
