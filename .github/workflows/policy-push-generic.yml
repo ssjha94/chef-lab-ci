@@ -16,7 +16,7 @@ on:
       converge_query:
         description: "Knife search query for converge (e.g., policy_group:prod-full or name:web-node1)"
         required: false
-        default: "chef_environment:prod"
+        default: "policy_group:prod-full"
         type: string
 
 env:
@@ -224,6 +224,7 @@ jobs:
       CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
       CHEF_SSL_VERIFY: ${{ secrets.CHEF_SSL_VERIFY }}
       SSH_USER: ${{ secrets.SSH_USER }}
+      ASSIGN_QUERY: ${{ inputs.assign_query || 'chef_environment:prod' }}
     steps:
       - name: Install Chef Workstation
         run: |
@@ -256,7 +257,7 @@ jobs:
 
       - name: Assign policy to nodes
         run: |
-          nodes=$(knife search node "${{ inputs.converge_query }}" -i | sed '/items found/d' | sed '/^$/d')
+          nodes=$(knife search node "${ASSIGN_QUERY}" -i | sed '/items found/d' | sed '/^$/d')
           if [ -z "$nodes" ]; then
             echo "No nodes matched converge_query; skipping assignment"
             exit 0
