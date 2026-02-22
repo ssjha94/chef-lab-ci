@@ -295,7 +295,18 @@ jobs:
           else
             query="${ASSIGN_QUERY:-policy_group:prod-wave1}"
             echo "Searching nodes with query: ${query}"
-            mapfile -t nodes < <(knife search node "${query}" -i | awk 'NF && $0 !~ /items found/')
+            set +e
+            search_output="$(knife search node "${query}" -i 2>&1)"
+            search_rc=$?
+            set -e
+            printf '%s\n' "${search_output}"
+
+            if [ "${search_rc}" -ne 0 ] && ! printf '%s\n' "${search_output}" | grep -q "^0 items found$"; then
+              echo "knife search failed for query: ${query}"
+              exit "${search_rc}"
+            fi
+
+            mapfile -t nodes < <(printf '%s\n' "${search_output}" | awk 'NF && $0 !~ /items found/ && $0 !~ /^(INFO:|WARN:|ERROR:)/')
           fi
 
           if [ "${#nodes[@]}" -eq 0 ]; then
@@ -306,7 +317,7 @@ jobs:
 
           for node in "${nodes[@]}"; do
             echo "Assigning policy ${POLICY_NAME} / group prod-full to ${node}"
-            knife node policy set "${node}" "${POLICY_NAME}" "prod-full"
+            knife node policy set "${node}" "prod-full" "${POLICY_NAME}"
           done
 
           target_nodes_csv="$(IFS=,; echo "${nodes[*]}")"
@@ -315,10 +326,25 @@ jobs:
       - name: Converge target nodes
         if: ${{ steps.assign.outputs.target_nodes != '' }}
         run: |
-          knife ssh --manual-list "${{ steps.assign.outputs.target_nodes }}" "sudo chef-client" \
-            -x "${SSH_USER:-ubuntu}" \
-            -i "$HOME/.ssh/ec2.pem" \
-            --attribute cloud.public_ipv4
+          set -euo pipefail
+          IFS=',' read -r -a target_nodes <<< "${{ steps.assign.outputs.target_nodes }}"
+          for node in "${target_nodes[@]}"; do
+            node_json="$(knife node show "${node}" -F json)"
+            node_host="$(printf '%s' "${node_json}" | ruby -rjson -e 'j=JSON.parse(STDIN.read); host=j.dig("automatic","cloud","public_ipv4") || j.dig("automatic","ipaddress") || j["ipaddress"] || j.dig("automatic","fqdn") || j["fqdn"] || ""; puts host')"
+            if [ -z "${node_host}" ]; then
+              echo "Could not determine SSH address for node ${node}"
+              exit 1
+            fi
+
+            echo "Converging ${node} via ${node_host}"
+            ssh \
+              -o BatchMode=yes \
+              -o ConnectTimeout=20 \
+              -o StrictHostKeyChecking=accept-new \
+              -i "$HOME/.ssh/ec2.pem" \
+              "${SSH_USER:-ubuntu}@${node_host}" \
+              "sudo chef-client"
+          done
 
       - name: Skip converge (no target nodes)
         if: ${{ steps.assign.outputs.target_nodes == '' }}
