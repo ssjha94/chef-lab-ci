@@ -225,6 +225,7 @@ jobs:
           knife[:ssh_user] = ENV['SSH_USER'] || 'ubuntu'
           knife[:identity_file] = File.join(ENV['HOME'], '.ssh', 'ec2.pem')
           knife[:ssh_verify_host_key] = :never
+          knife[:ssh_attribute] = 'cloud.public_ipv4'
           node_name        ENV['CHEF_USER']
           client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
           org_name         ENV['CHEF_ORG'] if ENV['CHEF_ORG']
