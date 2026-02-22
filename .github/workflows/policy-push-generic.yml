@@ -114,7 +114,7 @@ jobs:
 
       - name: Rehydrate cookbook cache from lock
         working-directory: ${{ env.COOKBOOK_PATH }}
-        run: chef install Policyfile.lock.json --no-deps
+        run: chef install Policyfile.lock.json
 
       - name: Push policy to prod-canary
         working-directory: ${{ env.COOKBOOK_PATH }}
@@ -162,7 +162,7 @@ jobs:
 
       - name: Rehydrate cookbook cache from lock
         working-directory: ${{ env.COOKBOOK_PATH }}
-        run: chef install Policyfile.lock.json --no-deps
+        run: chef install Policyfile.lock.json
 
       - name: Push policy to prod-wave1
         working-directory: ${{ env.COOKBOOK_PATH }}
@@ -210,7 +210,7 @@ jobs:
 
       - name: Rehydrate cookbook cache from lock
         working-directory: ${{ env.COOKBOOK_PATH }}
-        run: chef install Policyfile.lock.json --no-deps
+        run: chef install Policyfile.lock.json
 
       - name: Push policy to prod-full
         working-directory: ${{ env.COOKBOOK_PATH }}
