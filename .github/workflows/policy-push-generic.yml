@@ -58,7 +58,6 @@ jobs:
           client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
           org_name         ENV['CHEF_ORG'] if ENV['CHEF_ORG']
           ssl_verify_mode  (ENV['CHEF_SSL_VERIFY'] || ':verify_peer')
-          knife[:ssh_attribute] = 'cloud.public_ipv4'
           EOF
           echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
           chmod 600 ~/.chef/ci-user.pem
@@ -107,7 +106,6 @@ jobs:
           client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
           org_name         ENV['CHEF_ORG'] if ENV['CHEF_ORG']
           ssl_verify_mode  (ENV['CHEF_SSL_VERIFY'] || ':verify_peer')
-          knife[:ssh_attribute] = 'cloud.public_ipv4'
           EOF
           echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
           chmod 600 ~/.chef/ci-user.pem
@@ -155,7 +153,6 @@ jobs:
           client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
           org_name         ENV['CHEF_ORG'] if ENV['CHEF_ORG']
           ssl_verify_mode  (ENV['CHEF_SSL_VERIFY'] || ':verify_peer')
-          knife[:ssh_attribute] = 'cloud.public_ipv4'
           EOF
           echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
           chmod 600 ~/.chef/ci-user.pem
@@ -203,7 +200,6 @@ jobs:
           client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
           org_name         ENV['CHEF_ORG'] if ENV['CHEF_ORG']
           ssl_verify_mode  (ENV['CHEF_SSL_VERIFY'] || ':verify_peer')
-          knife[:ssh_attribute] = 'cloud.public_ipv4'
           EOF
           echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
           chmod 600 ~/.chef/ci-user.pem
@@ -240,7 +236,6 @@ jobs:
           chef_server_url  ENV['CHEF_SERVER_URL']
           knife[:ssh_user] = ENV['SSH_USER'] || 'ubuntu'
           knife[:identity_file] = File.join(ENV['HOME'], '.ssh', 'ec2.pem')
-          knife[:ssh_attribute] = 'cloud.public_ipv4'
           knife[:ssh_verify_host_key] = :never
           node_name        ENV['CHEF_USER']
           client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
@@ -261,9 +256,7 @@ jobs:
 
       - name: Converge target nodes
         run: |
-          knife ssh "${{ inputs.converge_query }}" "sudo chef-client" \
-            --attribute cloud.public_ipv4 \
-            --no-host-key-verify
+          knife ssh "${{ inputs.converge_query }}" "sudo chef-client"
 
       - name: Report attached policy revisions
         run: knife search node "${{ inputs.converge_query }}" -a policy_name -a policy_group -a policy_revision
