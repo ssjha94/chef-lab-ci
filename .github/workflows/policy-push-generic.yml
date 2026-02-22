@@ -266,10 +266,15 @@ jobs:
             echo "Assigning policy ${{ inputs.cookbook }} to $node in prod-full"
             knife node policy set "$node" "${{ inputs.cookbook }}" "prod-full"
           done
+          echo "TARGET_NODES=$nodes" >> $GITHUB_ENV
 
       - name: Converge target nodes
         run: |
-          knife ssh "policy_group:prod-full" "sudo chef-client" \
+          if [ -z "${TARGET_NODES}" ]; then
+            echo "No target nodes found from assignment step"
+            exit 1
+          fi
+          knife ssh --manual-list "${TARGET_NODES}" "sudo chef-client" \
             -x "${SSH_USER:-ubuntu}" \
             -i "$HOME/.ssh/ec2.pem" \
             --attribute cloud.public_ipv4
