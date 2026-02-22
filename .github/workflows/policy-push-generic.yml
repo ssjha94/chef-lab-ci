@@ -262,8 +262,6 @@ jobs:
       - name: Converge target nodes
         run: |
           knife ssh "${{ inputs.converge_query }}" "sudo chef-client" \
-            --ssh-user "${SSH_USER:-ubuntu}" \
-            --identity-file "$HOME/.ssh/ec2.pem" \
             --attribute cloud.public_ipv4 \
             --no-host-key-verify
 
