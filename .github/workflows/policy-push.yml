@@ -256,7 +256,7 @@ jobs:
             --ssh-user ubuntu \
             --ssh-identity-file ~/.ssh/ec2.pem \
             --attribute cloud.public_ipv4 \
-            --ssh-verify-host-key never
+            --no-host-key-verify
 
       - name: Report attached policy revisions
         run: knife search node "${{ inputs.converge_query }}" -a policy_name -a policy_group -a policy_revision
