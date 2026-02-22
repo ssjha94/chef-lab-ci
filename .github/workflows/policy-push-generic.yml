@@ -42,8 +42,8 @@ jobs:
 
       - name: Validate cookbook input
         run: |
-          test -d "cookbooks/${{ inputs.cookbook }}"
-          test -f "cookbooks/${{ inputs.cookbook }}/Policyfile.rb"
+          test -d .
+          test -f Policyfile.rb
 
       - name: Install Chef Workstation
         run: |
@@ -70,7 +70,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: policy-lock
-          path: cookbooks/${{ inputs.cookbook }}/Policyfile.lock.json
+          path: Policyfile.lock.json
 
   push-canary:
     name: Push prod-canary
