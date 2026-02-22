@@ -205,9 +205,6 @@ jobs:
     if: ${{ inputs.run_converge }}
     runs-on: ubuntu-latest
     needs: push-full
-    defaults:
-      run:
-        working-directory: cookbooks
     env:
       CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
       CHEF_ORG: ${{ secrets.CHEF_ORG }}
