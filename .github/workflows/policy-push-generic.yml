@@ -256,7 +256,9 @@ jobs:
 
       - name: Converge target nodes
         run: |
-          knife ssh "${{ inputs.converge_query }}" "sudo chef-client"
+          knife ssh "${{ inputs.converge_query }}" "sudo chef-client" \
+            -x "${SSH_USER:-ubuntu}" \
+            -i "$HOME/.ssh/ec2.pem"
 
       - name: Report attached policy revisions
         run: knife search node "${{ inputs.converge_query }}" -a policy_name -a policy_group -a policy_revision
