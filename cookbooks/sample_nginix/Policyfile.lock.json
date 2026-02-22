@@ -1,6 +1,6 @@
 {
-  "revision_id": "b2ca220da458973f6f328a7ac28fd4c3f3978fd29a4d12c00af76beb804a73ff",
-  "name": "sample_nginx",
+  "revision_id": "bbcbc28b5db6b28ecd6aa959cb132bda767b9e750de327544c24497a435c831a",
+  "name": "sample_nginix",
   "run_list": [
     "recipe[sample_nginix::default]"
   ],
@@ -8,30 +8,20 @@
 
   ],
   "cookbook_locks": {
-    "audit": {
-      "version": "9.5.0",
-      "identifier": "4f2cbe355786b19360128bb32c003545535e2c96",
-      "dotted_decimal_identifier": "22285718610478769.41482454345919488.58571867696278",
-      "cache_key": "audit-9.5.0-supermarket.chef.io",
-      "origin": "https://supermarket.chef.io:443/api/v1/cookbooks/audit/versions/9.5.0/download",
-      "source_options": {
-        "artifactserver": "https://supermarket.chef.io:443/api/v1/cookbooks/audit/versions/9.5.0/download",
-        "version": "9.5.0"
-      }
-    },
     "sample_nginix": {
-      "version": "0.1.0",
-      "identifier": "0146e599f9f656279cb425d4fe38f7d48462dcdc",
-      "dotted_decimal_identifier": "359426921461334.11149821634477624.272492126199004",
+      "version": "0.1.3",
+      "identifier": "0a2df7d78540830a02853d563bbedc3452f8e99c",
+      "dotted_decimal_identifier": "2865292263112835.2817521050074046.242117288454556",
       "source": ".",
       "cache_key": null,
       "scm_info": {
         "scm": "git",
         "remote": "https://github.com/ssjha94/chef-lab-ci.git",
-        "revision": "41b6bc2eb17e1436bd82974697d3845d9fbf2454",
+        "revision": "961a757ae2aaca8b0b76988274cca6c655cfcaf5",
         "working_tree_clean": false,
         "published": true,
         "synchronized_remote_branches": [
+          "origin/HEAD -> origin/main",
           "origin/main"
         ]
       },
@@ -49,23 +39,13 @@
   "solution_dependencies": {
     "Policyfile": [
       [
-        "audit",
-        "= 9.5.0"
-      ],
-      [
         "sample_nginix",
         ">= 0.0.0"
       ]
     ],
     "dependencies": {
-      "audit (9.5.0)": [
+      "sample_nginix (0.1.3)": [
 
-      ],
-      "sample_nginix (0.1.0)": [
-        [
-          "audit",
-          ">= 0.0.0"
-        ]
       ]
     }
   }
