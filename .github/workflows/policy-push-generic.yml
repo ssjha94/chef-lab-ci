@@ -14,9 +14,14 @@ on:
         default: false
         type: boolean
       converge_query:
-        description: "Knife search query for converge (e.g., policy_group:prod-full or name:web-node1)"
+        description: "Knife search query for converge selection (used when target_nodes is empty)"
         required: false
-        default: "policy_group:prod-full"
+        default: "policy_group:prod-wave1"
+        type: string
+      target_nodes:
+        description: "Optional explicit node names for converge/assignment (comma or space separated, e.g., web-node1,web-node2)"
+        required: false
+        default: ""
         type: string
 
 env:
@@ -272,19 +277,35 @@ jobs:
         id: assign
         env:
           ASSIGN_QUERY: ${{ inputs.converge_query }}
+          TARGET_NODES_INPUT: ${{ inputs.target_nodes }}
         run: |
           set -euo pipefail
-          query="${ASSIGN_QUERY:-policy_group:prod-full}"
-          echo "Searching nodes with query: ${query}"
-          mapfile -t nodes < <(knife search node "${query}" -i | awk 'NF && $0 !~ /items found/')
+          nodes=()
+
+          if [ -n "${TARGET_NODES_INPUT:-}" ]; then
+            echo "Using explicit target_nodes input"
+            normalized_nodes="$(echo "${TARGET_NODES_INPUT}" | tr '\n;' ',,' | sed 's/[[:space:]]\+/,/g; s/,,*/,/g; s/^,//; s/,$//')"
+            IFS=',' read -r -a candidate_nodes <<< "${normalized_nodes}"
+            for node in "${candidate_nodes[@]}"; do
+              clean_node="$(echo "${node}" | xargs)"
+              if [ -n "${clean_node}" ]; then
+                nodes+=("${clean_node}")
+              fi
+            done
+          else
+            query="${ASSIGN_QUERY:-policy_group:prod-wave1}"
+            echo "Searching nodes with query: ${query}"
+            mapfile -t nodes < <(knife search node "${query}" -i | awk 'NF && $0 !~ /items found/')
+          fi
+
           if [ "${#nodes[@]}" -eq 0 ]; then
-            echo "No nodes matched converge_query; skipping assignment and converge"
+            echo "No target nodes resolved from target_nodes/converge_query; skipping assignment and converge"
             echo "target_nodes=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           for node in "${nodes[@]}"; do
-            echo "Assigning policy ${POLICY_NAME} to ${node} in prod-full"
+            echo "Assigning policy ${POLICY_NAME} / group prod-full to ${node}"
             knife node policy set "${node}" "${POLICY_NAME}" "prod-full"
           done
 
@@ -305,11 +326,11 @@ jobs:
 
       - name: Report attached policy revisions
         if: ${{ steps.assign.outputs.target_nodes != '' }}
-        env:
-          REPORT_QUERY: ${{ inputs.converge_query }}
         run: |
-          query="${REPORT_QUERY:-policy_group:prod-full}"
-          knife search node "${query}" -a policy_name -a policy_group -a policy_revision
+          IFS=',' read -r -a report_nodes <<< "${{ steps.assign.outputs.target_nodes }}"
+          for node in "${report_nodes[@]}"; do
+            knife node show "${node}" -a policy_name -a policy_group -a policy_revision
+          done
 
       - name: Skip policy revision report (no target nodes)
         if: ${{ steps.assign.outputs.target_nodes == '' }}
