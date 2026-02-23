@@ -1,0 +1,56 @@
+---
+driver:
+  name: ec2
+  # aws_ssh_key_id: ssj_new_key
+  region: us-east-1
+  #availability_zone: us-east-1f 
+  require_chef_omnibus: true
+  #security_group_ids: sg-06754207a3de7a869
+  #subnet_id: subnet-556efd59
+  associate_public_ip: true
+  interface: dns
+  tags:
+    Name: "SSJ Ec2 Instance"
+    X-Contact: "sjha@progress.com"
+    X-Dept: "ProductSpeciliast"
+    X-TTL: "30"
+
+
+provisioner:
+  name: chef_zero
+  product_name: chef
+  # install_strategy: once
+  # client_rb:
+  #   chef_license: accept
+  #   ssl_verify_peer: false
+  #   exit_status: :enabled
+  #   client_fork: false
+  #   log_level: :debug
+  # #max_retries: 3
+  # #multiple_converge: 1
+  # # Allow reboots
+  # retry_on_exit: 1
+  # wait_for_retry: 150
+  # retry_on_exit_code: # An array of exit codes that can indicate that kitchen should retry the converge command. Defaults to an empty array.
+  #       - 35          # Reboot is scheduled
+  # root_path: /var/tmp/kitchen
+  
+  
+
+verifier:
+  name: inspec
+
+platforms:
+  - name: rhel
+    image_id: ami-0fe630eb857a6ec83
+
+    driver:
+      #image_id: ami-04609e6675dff8922
+      #tags:
+        #Name: <%= ENV['USER'] %>-tk-rhel
+
+suites:
+  - name: default
+    verifier:
+      inspec_tests:
+        - test/integration/default  

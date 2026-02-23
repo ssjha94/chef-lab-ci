@@ -1,0 +1,11 @@
+[Unit]
+Description=My One-Time Service
+
+[Service]
+ExecStart=/usr/bin/chef-client
+
+[Install]
+WantedBy=multi-user.target
+
+
+
