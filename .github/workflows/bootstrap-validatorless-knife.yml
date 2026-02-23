@@ -58,11 +58,6 @@ on:
         required: false
         default: ""
         type: string
-      configure_data_collector:
-        description: "Configure data collector settings on bootstrapped nodes for Automate reporting"
-        required: false
-        default: true
-        type: boolean
 
 env:
   CHEF_LICENSE: accept-no-persist
@@ -229,8 +224,6 @@ jobs:
       NODE_NAME_PREFIX: ${{ inputs.node_name_prefix }}
       BOOTSTRAP_VERSION: ${{ inputs.bootstrap_version }}
       HOSTS_CSV: ${{ needs.resolve_targets.outputs.hosts_csv }}
-      DATA_COLLECTOR_URL: ${{ secrets.DATA_COLLECTOR_URL }}
-      DATA_COLLECTOR_TOKEN: ${{ secrets.DATA_COLLECTOR_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -302,48 +295,11 @@ jobs:
               cmd+=(--bootstrap-version "${BOOTSTRAP_VERSION}")
             fi
 
-            # Inject data collector config into client.rb BEFORE first chef-client run
-            # Required by cookbooks that use compliance phase (include_profile)
-            if [ -n "${DATA_COLLECTOR_URL:-}" ] && [ -n "${DATA_COLLECTOR_TOKEN:-}" ]; then
-              cmd+=(
-                --config-option "data_collector.server_url=\"${DATA_COLLECTOR_URL}\""
-                --config-option "data_collector.token=\"${DATA_COLLECTOR_TOKEN}\""
-              )
-            fi
-
             "${cmd[@]}"
           done
 
           nodes_csv="$(IFS=,; echo "${nodes[*]}")"
           echo "nodes_csv=${nodes_csv}" >> "$GITHUB_OUTPUT"
-
-      - name: Configure data collector on bootstrapped nodes
-        if: ${{ inputs.configure_data_collector }}
-        run: |
-          set -euo pipefail
-          if [ -z "${DATA_COLLECTOR_URL:-}" ] || [ -z "${DATA_COLLECTOR_TOKEN:-}" ]; then
-            echo "Missing required secrets for data collector config: DATA_COLLECTOR_URL and/or DATA_COLLECTOR_TOKEN"
-            exit 1
-          fi
-
-          IFS=',' read -r -a hosts <<< "${HOSTS_CSV}"
-          for host in "${hosts[@]}"; do
-            echo "Configuring data collector on ${host}"
-            ssh \
-              -o BatchMode=yes \
-              -o ConnectTimeout=20 \
-              -o StrictHostKeyChecking=accept-new \
-              -i "$HOME/.ssh/ec2.pem" \
-              -p "${SSH_PORT}" \
-              "${SSH_USER}@${host}" \
-              "sudo bash -lc 'grep -q \"^data_collector.server_url \" /etc/chef/client.rb || echo \"data_collector.server_url \\\"${DATA_COLLECTOR_URL}\\\"\" >> /etc/chef/client.rb; grep -q \"^data_collector.token \" /etc/chef/client.rb || echo \"data_collector.token \\\"${DATA_COLLECTOR_TOKEN}\\\"\" >> /etc/chef/client.rb; chef-client -l info'"
-          done
-
-      - name: Compliance reporting note
-        if: ${{ inputs.configure_data_collector }}
-        run: |
-          echo "Data collector has been configured on target nodes."
-          echo "For nodes to appear in Automate Compliance, your policy/cookbook must execute compliance profiles (InSpec/compliance phase)."
 
       - name: Verify bootstrapped nodes
         run: |
