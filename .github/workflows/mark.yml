@@ -441,60 +441,96 @@ jobs:
             done
           fi
 
-          query=""
-          for f in "${filters[@]}"; do
-            encoded="$(ruby -ruri -e 'print URI.encode_www_form_component(ARGV[0])' "${f}")"
-            if [ -z "${query}" ]; then
-              query="?filter=${encoded}"
-            else
-              query="${query}&filter=${encoded}"
+          build_url() {
+            local extra_filter="${1:-}"
+            local query=""
+            local filter
+            local merged_filters=("${filters[@]}")
+            if [ -n "$extra_filter" ]; then
+              merged_filters+=("$extra_filter")
             fi
-          done
-          url="${endpoint}${query}"
-          echo "Calling Automate node_counts API for ${POLICY_NAME}/${POLICY_GROUP}"
-          response="$(curl -fsS -H "api-token: ${AUTOMATE_API_TOKEN}" "${url}")"
-          printf '%s\n' "${response}" > automate-node-counts.json
 
-          ruby -rjson <<'RUBY'
-          data = JSON.parse(File.read('automate-node-counts.json'))
-          counts = Hash.new(0)
-
-          def walk(obj, counts)
-            case obj
-            when Hash
-              if obj['status'] && obj['count']
-                counts[obj['status'].to_s.downcase] += obj['count'].to_i
-              elsif obj['name'] && obj['count']
-                counts[obj['name'].to_s.downcase] += obj['count'].to_i
+            for filter in "${merged_filters[@]}"; do
+              encoded="$(ruby -ruri -e 'print URI.encode_www_form_component(ARGV[0])' "$filter")"
+              if [ -z "$query" ]; then
+                query="?filter=${encoded}"
               else
-                obj.each do |k, v|
-                  key = k.to_s.downcase
-                  if v.is_a?(Numeric) && %w[success failed failure error unreachable skipped total].include?(key)
-                    counts[key] += v.to_i
-                  else
-                    walk(v, counts)
+                query="${query}&filter=${encoded}"
+              fi
+            done
+            printf '%s%s\n' "$endpoint" "$query"
+          }
+
+          summarize_response() {
+            ruby -rjson <<'RUBY'
+            data = JSON.parse(STDIN.read)
+            counts = Hash.new(0)
+
+            def walk(obj, counts)
+              case obj
+              when Hash
+                if obj['status'] && obj['count']
+                  counts[obj['status'].to_s.downcase] += obj['count'].to_i
+                elsif obj['name'] && obj['count']
+                  counts[obj['name'].to_s.downcase] += obj['count'].to_i
+                else
+                  obj.each do |k, v|
+                    key = k.to_s.downcase
+                    if v.is_a?(Numeric) && %w[success failed failure error unreachable skipped total].include?(key)
+                      counts[key] += v.to_i
+                    else
+                      walk(v, counts)
+                    end
                   end
                 end
+              when Array
+                obj.each { |v| walk(v, counts) }
               end
-            when Array
-              obj.each { |v| walk(v, counts) }
             end
-          end
 
-          walk(data, counts)
-          success = counts['success']
-          failed = counts['failed'] + counts['failure'] + counts['error'] + counts['unreachable']
-          skipped = counts['skipped']
-          total = counts['total']
-          total = success + failed + skipped if total.zero?
+            walk(data, counts)
+            success = counts['success']
+            failed = counts['failed'] + counts['failure'] + counts['error'] + counts['unreachable']
+            skipped = counts['skipped']
+            total = counts['total']
+            total = success + failed + skipped if total.zero?
+            puts "#{success} #{failed} #{skipped} #{total}"
+            RUBY
+          }
 
-          puts "Automate health summary: success=#{success}, failed=#{failed}, skipped=#{skipped}, total=#{total}"
-          File.open(ENV['GITHUB_OUTPUT'], 'a') do |f|
-            f.puts "success_count=#{success}"
-            f.puts "failed_count=#{failed}"
-            f.puts "total_count=#{total}"
-          end
-          RUBY
+          base_url="$(build_url)"
+          echo "Calling Automate node_counts API for ${POLICY_NAME}/${POLICY_GROUP}"
+          base_response="$(curl -fsS -H "api-token: ${AUTOMATE_API_TOKEN}" "$base_url")"
+          read -r base_success base_failed base_skipped base_total <<< "$(printf '%s\n' "$base_response" | summarize_response)"
+
+          success_url="$(build_url "status:success")"
+          success_response="$(curl -fsS -H "api-token: ${AUTOMATE_API_TOKEN}" "$success_url")"
+          read -r status_success _ _ _ <<< "$(printf '%s\n' "$success_response" | summarize_response)"
+
+          status_failed=0
+          for st in failed failure error unreachable; do
+            st_url="$(build_url "status:${st}")"
+            st_response="$(curl -fsS -H "api-token: ${AUTOMATE_API_TOKEN}" "$st_url")"
+            read -r _ st_failed _ _ <<< "$(printf '%s\n' "$st_response" | summarize_response)"
+            status_failed=$((status_failed + st_failed))
+          done
+
+          skipped_url="$(build_url "status:skipped")"
+          skipped_response="$(curl -fsS -H "api-token: ${AUTOMATE_API_TOKEN}" "$skipped_url")"
+          read -r _ _ status_skipped _ <<< "$(printf '%s\n' "$skipped_response" | summarize_response)"
+
+          status_total=$((status_success + status_failed + status_skipped))
+          if [ "$status_total" -eq 0 ] && [ "$base_total" -gt 0 ]; then
+            status_total="$base_total"
+          fi
+
+          echo "Automate base summary: success=${base_success}, failed=${base_failed}, skipped=${base_skipped}, total=${base_total}"
+          echo "Automate filtered summary (status filters): success=${status_success}, failed=${status_failed}, skipped=${status_skipped}, total=${status_total}"
+          echo "success_count=${status_success}" >> "$GITHUB_OUTPUT"
+          echo "failed_count=${status_failed}" >> "$GITHUB_OUTPUT"
+          echo "skipped_count=${status_skipped}" >> "$GITHUB_OUTPUT"
+          echo "total_count=${status_total}" >> "$GITHUB_OUTPUT"
+          echo "base_total_count=${base_total}" >> "$GITHUB_OUTPUT"
 
       - name: Enforce Automate health gate (dev)
         run: |
@@ -652,60 +688,96 @@ jobs:
             done
           fi
 
-          query=""
-          for f in "${filters[@]}"; do
-            encoded="$(ruby -ruri -e 'print URI.encode_www_form_component(ARGV[0])' "${f}")"
-            if [ -z "${query}" ]; then
-              query="?filter=${encoded}"
-            else
-              query="${query}&filter=${encoded}"
+          build_url() {
+            local extra_filter="${1:-}"
+            local query=""
+            local filter
+            local merged_filters=("${filters[@]}")
+            if [ -n "$extra_filter" ]; then
+              merged_filters+=("$extra_filter")
             fi
-          done
-          url="${endpoint}${query}"
-          echo "Calling Automate node_counts API for ${POLICY_NAME}/${POLICY_GROUP}"
-          response="$(curl -fsS -H "api-token: ${AUTOMATE_API_TOKEN}" "${url}")"
-          printf '%s\n' "${response}" > automate-node-counts.json
 
-          ruby -rjson <<'RUBY'
-          data = JSON.parse(File.read('automate-node-counts.json'))
-          counts = Hash.new(0)
-
-          def walk(obj, counts)
-            case obj
-            when Hash
-              if obj['status'] && obj['count']
-                counts[obj['status'].to_s.downcase] += obj['count'].to_i
-              elsif obj['name'] && obj['count']
-                counts[obj['name'].to_s.downcase] += obj['count'].to_i
+            for filter in "${merged_filters[@]}"; do
+              encoded="$(ruby -ruri -e 'print URI.encode_www_form_component(ARGV[0])' "$filter")"
+              if [ -z "$query" ]; then
+                query="?filter=${encoded}"
               else
-                obj.each do |k, v|
-                  key = k.to_s.downcase
-                  if v.is_a?(Numeric) && %w[success failed failure error unreachable skipped total].include?(key)
-                    counts[key] += v.to_i
-                  else
-                    walk(v, counts)
+                query="${query}&filter=${encoded}"
+              fi
+            done
+            printf '%s%s\n' "$endpoint" "$query"
+          }
+
+          summarize_response() {
+            ruby -rjson <<'RUBY'
+            data = JSON.parse(STDIN.read)
+            counts = Hash.new(0)
+
+            def walk(obj, counts)
+              case obj
+              when Hash
+                if obj['status'] && obj['count']
+                  counts[obj['status'].to_s.downcase] += obj['count'].to_i
+                elsif obj['name'] && obj['count']
+                  counts[obj['name'].to_s.downcase] += obj['count'].to_i
+                else
+                  obj.each do |k, v|
+                    key = k.to_s.downcase
+                    if v.is_a?(Numeric) && %w[success failed failure error unreachable skipped total].include?(key)
+                      counts[key] += v.to_i
+                    else
+                      walk(v, counts)
+                    end
                   end
                 end
+              when Array
+                obj.each { |v| walk(v, counts) }
               end
-            when Array
-              obj.each { |v| walk(v, counts) }
             end
-          end
 
-          walk(data, counts)
-          success = counts['success']
-          failed = counts['failed'] + counts['failure'] + counts['error'] + counts['unreachable']
-          skipped = counts['skipped']
-          total = counts['total']
-          total = success + failed + skipped if total.zero?
+            walk(data, counts)
+            success = counts['success']
+            failed = counts['failed'] + counts['failure'] + counts['error'] + counts['unreachable']
+            skipped = counts['skipped']
+            total = counts['total']
+            total = success + failed + skipped if total.zero?
+            puts "#{success} #{failed} #{skipped} #{total}"
+            RUBY
+          }
 
-          puts "Automate health summary: success=#{success}, failed=#{failed}, skipped=#{skipped}, total=#{total}"
-          File.open(ENV['GITHUB_OUTPUT'], 'a') do |f|
-            f.puts "success_count=#{success}"
-            f.puts "failed_count=#{failed}"
-            f.puts "total_count=#{total}"
-          end
-          RUBY
+          base_url="$(build_url)"
+          echo "Calling Automate node_counts API for ${POLICY_NAME}/${POLICY_GROUP}"
+          base_response="$(curl -fsS -H "api-token: ${AUTOMATE_API_TOKEN}" "$base_url")"
+          read -r base_success base_failed base_skipped base_total <<< "$(printf '%s\n' "$base_response" | summarize_response)"
+
+          success_url="$(build_url "status:success")"
+          success_response="$(curl -fsS -H "api-token: ${AUTOMATE_API_TOKEN}" "$success_url")"
+          read -r status_success _ _ _ <<< "$(printf '%s\n' "$success_response" | summarize_response)"
+
+          status_failed=0
+          for st in failed failure error unreachable; do
+            st_url="$(build_url "status:${st}")"
+            st_response="$(curl -fsS -H "api-token: ${AUTOMATE_API_TOKEN}" "$st_url")"
+            read -r _ st_failed _ _ <<< "$(printf '%s\n' "$st_response" | summarize_response)"
+            status_failed=$((status_failed + st_failed))
+          done
+
+          skipped_url="$(build_url "status:skipped")"
+          skipped_response="$(curl -fsS -H "api-token: ${AUTOMATE_API_TOKEN}" "$skipped_url")"
+          read -r _ _ status_skipped _ <<< "$(printf '%s\n' "$skipped_response" | summarize_response)"
+
+          status_total=$((status_success + status_failed + status_skipped))
+          if [ "$status_total" -eq 0 ] && [ "$base_total" -gt 0 ]; then
+            status_total="$base_total"
+          fi
+
+          echo "Automate base summary: success=${base_success}, failed=${base_failed}, skipped=${base_skipped}, total=${base_total}"
+          echo "Automate filtered summary (status filters): success=${status_success}, failed=${status_failed}, skipped=${status_skipped}, total=${status_total}"
+          echo "success_count=${status_success}" >> "$GITHUB_OUTPUT"
+          echo "failed_count=${status_failed}" >> "$GITHUB_OUTPUT"
+          echo "skipped_count=${status_skipped}" >> "$GITHUB_OUTPUT"
+          echo "total_count=${status_total}" >> "$GITHUB_OUTPUT"
+          echo "base_total_count=${base_total}" >> "$GITHUB_OUTPUT"
 
       - name: Enforce Automate health gate (test)
         run: |
@@ -863,60 +935,96 @@ jobs:
             done
           fi
 
-          query=""
-          for f in "${filters[@]}"; do
-            encoded="$(ruby -ruri -e 'print URI.encode_www_form_component(ARGV[0])' "${f}")"
-            if [ -z "${query}" ]; then
-              query="?filter=${encoded}"
-            else
-              query="${query}&filter=${encoded}"
+          build_url() {
+            local extra_filter="${1:-}"
+            local query=""
+            local filter
+            local merged_filters=("${filters[@]}")
+            if [ -n "$extra_filter" ]; then
+              merged_filters+=("$extra_filter")
             fi
-          done
-          url="${endpoint}${query}"
-          echo "Calling Automate node_counts API for ${POLICY_NAME}/${POLICY_GROUP}"
-          response="$(curl -fsS -H "api-token: ${AUTOMATE_API_TOKEN}" "${url}")"
-          printf '%s\n' "${response}" > automate-node-counts.json
 
-          ruby -rjson <<'RUBY'
-          data = JSON.parse(File.read('automate-node-counts.json'))
-          counts = Hash.new(0)
-
-          def walk(obj, counts)
-            case obj
-            when Hash
-              if obj['status'] && obj['count']
-                counts[obj['status'].to_s.downcase] += obj['count'].to_i
-              elsif obj['name'] && obj['count']
-                counts[obj['name'].to_s.downcase] += obj['count'].to_i
+            for filter in "${merged_filters[@]}"; do
+              encoded="$(ruby -ruri -e 'print URI.encode_www_form_component(ARGV[0])' "$filter")"
+              if [ -z "$query" ]; then
+                query="?filter=${encoded}"
               else
-                obj.each do |k, v|
-                  key = k.to_s.downcase
-                  if v.is_a?(Numeric) && %w[success failed failure error unreachable skipped total].include?(key)
-                    counts[key] += v.to_i
-                  else
-                    walk(v, counts)
+                query="${query}&filter=${encoded}"
+              fi
+            done
+            printf '%s%s\n' "$endpoint" "$query"
+          }
+
+          summarize_response() {
+            ruby -rjson <<'RUBY'
+            data = JSON.parse(STDIN.read)
+            counts = Hash.new(0)
+
+            def walk(obj, counts)
+              case obj
+              when Hash
+                if obj['status'] && obj['count']
+                  counts[obj['status'].to_s.downcase] += obj['count'].to_i
+                elsif obj['name'] && obj['count']
+                  counts[obj['name'].to_s.downcase] += obj['count'].to_i
+                else
+                  obj.each do |k, v|
+                    key = k.to_s.downcase
+                    if v.is_a?(Numeric) && %w[success failed failure error unreachable skipped total].include?(key)
+                      counts[key] += v.to_i
+                    else
+                      walk(v, counts)
+                    end
                   end
                 end
+              when Array
+                obj.each { |v| walk(v, counts) }
               end
-            when Array
-              obj.each { |v| walk(v, counts) }
             end
-          end
 
-          walk(data, counts)
-          success = counts['success']
-          failed = counts['failed'] + counts['failure'] + counts['error'] + counts['unreachable']
-          skipped = counts['skipped']
-          total = counts['total']
-          total = success + failed + skipped if total.zero?
+            walk(data, counts)
+            success = counts['success']
+            failed = counts['failed'] + counts['failure'] + counts['error'] + counts['unreachable']
+            skipped = counts['skipped']
+            total = counts['total']
+            total = success + failed + skipped if total.zero?
+            puts "#{success} #{failed} #{skipped} #{total}"
+            RUBY
+          }
 
-          puts "Automate health summary: success=#{success}, failed=#{failed}, skipped=#{skipped}, total=#{total}"
-          File.open(ENV['GITHUB_OUTPUT'], 'a') do |f|
-            f.puts "success_count=#{success}"
-            f.puts "failed_count=#{failed}"
-            f.puts "total_count=#{total}"
-          end
-          RUBY
+          base_url="$(build_url)"
+          echo "Calling Automate node_counts API for ${POLICY_NAME}/${POLICY_GROUP}"
+          base_response="$(curl -fsS -H "api-token: ${AUTOMATE_API_TOKEN}" "$base_url")"
+          read -r base_success base_failed base_skipped base_total <<< "$(printf '%s\n' "$base_response" | summarize_response)"
+
+          success_url="$(build_url "status:success")"
+          success_response="$(curl -fsS -H "api-token: ${AUTOMATE_API_TOKEN}" "$success_url")"
+          read -r status_success _ _ _ <<< "$(printf '%s\n' "$success_response" | summarize_response)"
+
+          status_failed=0
+          for st in failed failure error unreachable; do
+            st_url="$(build_url "status:${st}")"
+            st_response="$(curl -fsS -H "api-token: ${AUTOMATE_API_TOKEN}" "$st_url")"
+            read -r _ st_failed _ _ <<< "$(printf '%s\n' "$st_response" | summarize_response)"
+            status_failed=$((status_failed + st_failed))
+          done
+
+          skipped_url="$(build_url "status:skipped")"
+          skipped_response="$(curl -fsS -H "api-token: ${AUTOMATE_API_TOKEN}" "$skipped_url")"
+          read -r _ _ status_skipped _ <<< "$(printf '%s\n' "$skipped_response" | summarize_response)"
+
+          status_total=$((status_success + status_failed + status_skipped))
+          if [ "$status_total" -eq 0 ] && [ "$base_total" -gt 0 ]; then
+            status_total="$base_total"
+          fi
+
+          echo "Automate base summary: success=${base_success}, failed=${base_failed}, skipped=${base_skipped}, total=${base_total}"
+          echo "Automate filtered summary (status filters): success=${status_success}, failed=${status_failed}, skipped=${status_skipped}, total=${status_total}"
+          echo "success_count=${status_success}" >> "$GITHUB_OUTPUT"
+          echo "failed_count=${status_failed}" >> "$GITHUB_OUTPUT"
+          echo "skipped_count=${status_skipped}" >> "$GITHUB_OUTPUT"
+          echo "total_count=${status_total}" >> "$GITHUB_OUTPUT"
+          echo "base_total_count=${base_total}" >> "$GITHUB_OUTPUT"
 
       - name: Enforce Automate health gate (prod)
         run: |
