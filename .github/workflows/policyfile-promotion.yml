@@ -23,6 +23,16 @@ on:
         required: false
         default: ""
         type: string
+      enable_automate_check:
+        description: "After converge, query Chef Automate API for node_count status (requires AUTOMATE_URL and AUTOMATE_API_TOKEN secrets)"
+        required: false
+        default: false
+        type: boolean
+      automate_filters:
+        description: "Comma-separated Automate node_count filters (default: status:success)"
+        required: false
+        default: "status:success"
+        type: string
 
 env:
   CHEF_LICENSE: accept-no-persist
@@ -294,6 +304,8 @@ jobs:
       CHEF_SSL_VERIFY: ${{ secrets.CHEF_SSL_VERIFY }}
       SSH_USER: ${{ secrets.SSH_USER }}
       POLICY_NAME: ${{ needs.build-lock.outputs.policy_name }}
+      AUTOMATE_URL: ${{ secrets.AUTOMATE_URL }}
+      AUTOMATE_API_TOKEN: ${{ secrets.AUTOMATE_API_TOKEN }}
     steps:
       - name: Install Chef Workstation
         run: |
@@ -415,6 +427,39 @@ jobs:
           for node in "${report_nodes[@]}"; do
             knife node show "${node}" -a policy_name -a policy_group -a policy_revision
           done
+
+      - name: Check Chef Automate status (optional)
+        if: ${{ inputs.enable_automate_check && steps.assign.outputs.target_nodes != '' }}
+        env:
+          AUTOMATE_FILTERS: ${{ inputs.automate_filters }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AUTOMATE_URL:-}" ] || [ -z "${AUTOMATE_API_TOKEN:-}" ]; then
+            echo "Missing required secrets for Automate check: AUTOMATE_URL and/or AUTOMATE_API_TOKEN"
+            exit 1
+          fi
+
+          endpoint="${AUTOMATE_URL%/}/api/v0/cfgmgmt/stats/node_counts"
+          query=""
+          IFS=',' read -r -a filters <<< "${AUTOMATE_FILTERS:-status:success}"
+          for raw_filter in "${filters[@]}"; do
+            filter="$(echo "${raw_filter}" | xargs)"
+            if [ -z "${filter}" ]; then
+              continue
+            fi
+            encoded_filter="$(ruby -ruri -e 'print URI.encode_www_form_component(ARGV[0])' "${filter}")"
+            if [ -z "${query}" ]; then
+              query="?filter=${encoded_filter}"
+            else
+              query="${query}&filter=${encoded_filter}"
+            fi
+          done
+
+          url="${endpoint}${query}"
+          echo "Calling Automate node_count API"
+          response="$(curl -fsS -H "api-token: ${AUTOMATE_API_TOKEN}" "${url}")"
+          printf '%s\n' "${response}" | ruby -rjson -e 'JSON.parse(STDIN.read); puts "Automate API response JSON validated"'
+          printf '%s\n' "${response}"
 
       - name: Skip policy revision report (no target nodes)
         if: ${{ steps.assign.outputs.target_nodes == '' }}
