@@ -1,0 +1,351 @@
+name: Mark
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cookbooks/**'
+      - 'policyfiles/**'
+      - '!cookbooks/**/test/**'
+      - '!cookbooks/**/compliance/**'
+  workflow_dispatch:
+    inputs:
+      cookbook:
+        description: 'Cookbook to validate (optional, e.g., base_linux)'
+        required: false
+      policyfile:
+        description: 'Policyfile to deploy (optional, e.g., base_linux.rb)'
+        required: false
+      canary_delay_hours:
+        description: 'Delay before canary promotion (hours)'
+        required: false
+        default: '2'
+      prod_delay_hours:
+        description: 'Delay before prod promotion (hours)'
+        required: false
+        default: '24'
+
+env:
+  CHEF_LICENSE: accept-silent
+
+jobs:
+  detect-cookbooks:
+    name: Detect Changed Cookbooks
+    runs-on: ubuntu-latest
+    outputs:
+      cookbooks: ${{ steps.detect.outputs.cookbooks }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect modified cookbooks
+        id: detect
+        run: |
+          if [ -n "${{ github.event.inputs.cookbook }}" ]; then
+            COOKBOOKS='["${{ github.event.inputs.cookbook }}"]'
+          else
+            COOKBOOKS=$(git diff origin/main...HEAD --name-only 2>/dev/null | grep '^cookbooks/' | cut -d'/' -f2 | sort -u | jq -R -s -c 'split("\n")[:-1]')
+          fi
+
+          if [ -z "$COOKBOOKS" ] || [ "$COOKBOOKS" == "[]" ]; then
+            echo "No cookbooks detected"
+            COOKBOOKS='[]'
+          fi
+
+          echo "cookbooks=$COOKBOOKS" >> $GITHUB_OUTPUT
+          echo "Detected cookbooks: $COOKBOOKS"
+
+  validate-versions:
+    name: Validate Cookbook Versions
+    needs: detect-cookbooks
+    if: needs.detect-cookbooks.outputs.cookbooks != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        cookbook: ${{ fromJson(needs.detect-cookbooks.outputs.cookbooks) }}
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate version bump
+        working-directory: cookbooks/${{ matrix.cookbook }}
+        run: |
+          echo "Validating version bump for ${{ matrix.cookbook }}..."
+
+          CURRENT_VERSION=$(grep -E "^version" metadata.rb | head -1 | awk '{print $2}' | tr -d "'\"")
+          echo "Current version: $CURRENT_VERSION"
+
+          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            echo "Running on main branch - skipping version comparison"
+            echo "Version validation skipped for direct main push"
+            exit 0
+          fi
+
+          if git show main:cookbooks/${{ matrix.cookbook }}/metadata.rb >/dev/null 2>&1; then
+            PREVIOUS_VERSION=$(git show main:cookbooks/${{ matrix.cookbook }}/metadata.rb 2>/dev/null | grep -E "^version" | head -1 | awk '{print $2}' | tr -d "'\"")
+            echo "Previous version (main): $PREVIOUS_VERSION"
+
+            if [ "$CURRENT_VERSION" == "$PREVIOUS_VERSION" ]; then
+              echo "ERROR: Version was not bumped!"
+              echo "Current: $CURRENT_VERSION"
+              echo "Previous: $PREVIOUS_VERSION"
+              echo "Please bump the version in metadata.rb before pushing"
+              exit 1
+            else
+              echo "Version properly bumped from $PREVIOUS_VERSION to $CURRENT_VERSION"
+            fi
+          else
+            echo "New cookbook detected - this will be version $CURRENT_VERSION"
+            echo "First version is acceptable"
+          fi
+
+  detect-policyfiles:
+    name: Detect Policyfiles
+    runs-on: ubuntu-latest
+    outputs:
+      policyfiles: ${{ steps.detect.outputs.policyfiles }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect policyfiles
+        id: detect
+        run: |
+          if [ -n "${{ github.event.inputs.policyfile }}" ]; then
+            POLICYFILES='["${{ github.event.inputs.policyfile }}"]'
+          else
+            POLICYFILES=$(find policyfiles -maxdepth 1 -name '*.rb' -print | sed 's|^policyfiles/||' | sort | jq -R -s -c 'split("\n")[:-1]')
+          fi
+
+          if [ -z "$POLICYFILES" ] || [ "$POLICYFILES" == "[]" ]; then
+            echo "No policyfiles detected"
+            POLICYFILES='[]'
+          fi
+
+          echo "policyfiles=$POLICYFILES" >> $GITHUB_OUTPUT
+          echo "Detected policyfiles: $POLICYFILES"
+
+  build-lockfiles:
+    name: Build Policy Lockfiles
+    needs: [detect-policyfiles, validate-versions]
+    if: needs.detect-policyfiles.outputs.policyfiles != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        policyfile: ${{ fromJson(needs.detect-policyfiles.outputs.policyfiles) }}
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Chef Workstation
+        run: |
+          echo "Installing Chef Workstation..."
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation -c stable
+          echo "/opt/chef-workstation/bin" >> $GITHUB_PATH
+          echo "Chef Workstation ready"
+
+      - name: Build lockfile
+        run: |
+          set -euo pipefail
+          POLICYFILE="policyfiles/${{ matrix.policyfile }}"
+          echo "Building lockfile for $POLICYFILE"
+          chef install "$POLICYFILE"
+
+      - name: Resolve lockfile path
+        id: lockfile
+        run: |
+          POLICYFILE="policyfiles/${{ matrix.policyfile }}"
+          LOCKFILE="${POLICYFILE%.rb}.lock.json"
+          echo "lockfile=$LOCKFILE" >> $GITHUB_OUTPUT
+
+      - name: Upload lockfile artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: policy-lockfile-${{ matrix.policyfile }}
+          path: ${{ steps.lockfile.outputs.lockfile }}
+
+  push-dev:
+    name: Push Policy (dev)
+    needs: [build-lockfiles, detect-policyfiles]
+    if: needs.detect-policyfiles.outputs.policyfiles != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        policyfile: ${{ fromJson(needs.detect-policyfiles.outputs.policyfiles) }}
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Chef Workstation
+        run: |
+          echo "Installing Chef Workstation..."
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation -c stable
+          echo "/opt/chef-workstation/bin" >> $GITHUB_PATH
+          echo "Chef Workstation ready"
+
+      - name: Configure Chef Credentials
+        env:
+          CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
+          CHEF_ORG: ${{ secrets.CHEF_ORG }}
+          CHEF_USER: ${{ secrets.CHEF_USER }}
+          CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+        run: |
+          mkdir -p ~/.chef
+          cat > ~/.chef/knife.rb <<EOF
+          node_name        "${CHEF_USER}"
+          client_key       "${HOME}/.chef/ci-user.pem"
+          chef_server_url  "${CHEF_SERVER_URL}"
+          org_name         "${CHEF_ORG}"
+          ssl_verify_mode  :verify_peer
+          EOF
+          echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
+          chmod 600 ~/.chef/ci-user.pem
+          echo "Chef credentials configured with SSL verification"
+
+      - name: Download lockfile artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: policy-lockfile-${{ matrix.policyfile }}
+          path: policyfiles
+
+      - name: Push policy to dev
+        run: |
+          set -euo pipefail
+          POLICYFILE="policyfiles/${{ matrix.policyfile }}"
+          echo "Pushing policy to dev: $POLICYFILE"
+          chef push dev "$POLICYFILE"
+          echo "Dev push complete"
+
+  push-canary:
+    name: Push Policy (canary)
+    needs: [push-dev, detect-policyfiles]
+    if: needs.detect-policyfiles.outputs.policyfiles != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        policyfile: ${{ fromJson(needs.detect-policyfiles.outputs.policyfiles) }}
+      fail-fast: false
+    env:
+      CANARY_DELAY_HOURS: ${{ github.event.inputs.canary_delay_hours || '2' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Chef Workstation
+        run: |
+          echo "Installing Chef Workstation..."
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation -c stable
+          echo "/opt/chef-workstation/bin" >> $GITHUB_PATH
+          echo "Chef Workstation ready"
+
+      - name: Configure Chef Credentials
+        env:
+          CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
+          CHEF_ORG: ${{ secrets.CHEF_ORG }}
+          CHEF_USER: ${{ secrets.CHEF_USER }}
+          CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+        run: |
+          mkdir -p ~/.chef
+          cat > ~/.chef/knife.rb <<EOF
+          node_name        "${CHEF_USER}"
+          client_key       "${HOME}/.chef/ci-user.pem"
+          chef_server_url  "${CHEF_SERVER_URL}"
+          org_name         "${CHEF_ORG}"
+          ssl_verify_mode  :verify_peer
+          EOF
+          echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
+          chmod 600 ~/.chef/ci-user.pem
+          echo "Chef credentials configured with SSL verification"
+
+      - name: Download lockfile artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: policy-lockfile-${{ matrix.policyfile }}
+          path: policyfiles
+
+      - name: Wait before canary promotion
+        if: env.CANARY_DELAY_HOURS != '0'
+        run: |
+          set -euo pipefail
+          echo "Waiting ${CANARY_DELAY_HOURS} hour(s) before canary promotion..."
+          sleep $((CANARY_DELAY_HOURS * 3600))
+
+      - name: Push policy to canary
+        run: |
+          set -euo pipefail
+          POLICYFILE="policyfiles/${{ matrix.policyfile }}"
+          echo "Pushing policy to canary: $POLICYFILE"
+          chef push canary "$POLICYFILE"
+          echo "Canary push complete"
+
+  push-prod:
+    name: Push Policy (prod)
+    needs: [push-canary, detect-policyfiles]
+    if: needs.detect-policyfiles.outputs.policyfiles != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        policyfile: ${{ fromJson(needs.detect-policyfiles.outputs.policyfiles) }}
+      fail-fast: false
+    env:
+      PROD_DELAY_HOURS: ${{ github.event.inputs.prod_delay_hours || '24' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Chef Workstation
+        run: |
+          echo "Installing Chef Workstation..."
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation -c stable
+          echo "/opt/chef-workstation/bin" >> $GITHUB_PATH
+          echo "Chef Workstation ready"
+
+      - name: Configure Chef Credentials
+        env:
+          CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
+          CHEF_ORG: ${{ secrets.CHEF_ORG }}
+          CHEF_USER: ${{ secrets.CHEF_USER }}
+          CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+        run: |
+          mkdir -p ~/.chef
+          cat > ~/.chef/knife.rb <<EOF
+          node_name        "${CHEF_USER}"
+          client_key       "${HOME}/.chef/ci-user.pem"
+          chef_server_url  "${CHEF_SERVER_URL}"
+          org_name         "${CHEF_ORG}"
+          ssl_verify_mode  :verify_peer
+          EOF
+          echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
+          chmod 600 ~/.chef/ci-user.pem
+          echo "Chef credentials configured with SSL verification"
+
+      - name: Download lockfile artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: policy-lockfile-${{ matrix.policyfile }}
+          path: policyfiles
+
+      - name: Wait before prod promotion
+        if: env.PROD_DELAY_HOURS != '0'
+        run: |
+          set -euo pipefail
+          echo "Waiting ${PROD_DELAY_HOURS} hour(s) before prod promotion..."
+          sleep $((PROD_DELAY_HOURS * 3600))
+
+      - name: Push policy to prod
+        run: |
+          set -euo pipefail
+          POLICYFILE="policyfiles/${{ matrix.policyfile }}"
+          echo "Pushing policy to prod: $POLICYFILE"
+          chef push prod "$POLICYFILE"
+          echo "Prod push complete"
