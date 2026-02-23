@@ -284,6 +284,12 @@ jobs:
         policyfile: ${{ fromJson(needs.detect-policyfiles.outputs.policyfiles) }}
       fail-fast: false
     timeout-minutes: 30
+    env:
+      CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
+      CHEF_ORG: ${{ secrets.CHEF_ORG }}
+      CHEF_USER: ${{ secrets.CHEF_USER }}
+      CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+      CHEF_SSL_VERIFY: ${{ secrets.CHEF_SSL_VERIFY }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -295,12 +301,6 @@ jobs:
           echo "/opt/chef-workstation/bin" >> "$GITHUB_PATH"
 
       - name: Configure Chef Credentials
-        env:
-          CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
-          CHEF_ORG: ${{ secrets.CHEF_ORG }}
-          CHEF_USER: ${{ secrets.CHEF_USER }}
-          CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
-          CHEF_SSL_VERIFY: ${{ secrets.CHEF_SSL_VERIFY }}
         run: |
           set -euo pipefail
           for req in CHEF_SERVER_URL CHEF_USER CHEF_USER_KEY; do
@@ -495,6 +495,12 @@ jobs:
       fail-fast: false
     environment: test
     timeout-minutes: 30
+    env:
+      CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
+      CHEF_ORG: ${{ secrets.CHEF_ORG }}
+      CHEF_USER: ${{ secrets.CHEF_USER }}
+      CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+      CHEF_SSL_VERIFY: ${{ secrets.CHEF_SSL_VERIFY }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -506,12 +512,6 @@ jobs:
           echo "/opt/chef-workstation/bin" >> "$GITHUB_PATH"
 
       - name: Configure Chef Credentials
-        env:
-          CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
-          CHEF_ORG: ${{ secrets.CHEF_ORG }}
-          CHEF_USER: ${{ secrets.CHEF_USER }}
-          CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
-          CHEF_SSL_VERIFY: ${{ secrets.CHEF_SSL_VERIFY }}
         run: |
           set -euo pipefail
           for req in CHEF_SERVER_URL CHEF_USER CHEF_USER_KEY; do
@@ -706,6 +706,12 @@ jobs:
       fail-fast: false
     environment: prod
     timeout-minutes: 30
+    env:
+      CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
+      CHEF_ORG: ${{ secrets.CHEF_ORG }}
+      CHEF_USER: ${{ secrets.CHEF_USER }}
+      CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+      CHEF_SSL_VERIFY: ${{ secrets.CHEF_SSL_VERIFY }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -717,12 +723,6 @@ jobs:
           echo "/opt/chef-workstation/bin" >> "$GITHUB_PATH"
 
       - name: Configure Chef Credentials
-        env:
-          CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
-          CHEF_ORG: ${{ secrets.CHEF_ORG }}
-          CHEF_USER: ${{ secrets.CHEF_USER }}
-          CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
-          CHEF_SSL_VERIFY: ${{ secrets.CHEF_SSL_VERIFY }}
         run: |
           set -euo pipefail
           for req in CHEF_SERVER_URL CHEF_USER CHEF_USER_KEY; do
