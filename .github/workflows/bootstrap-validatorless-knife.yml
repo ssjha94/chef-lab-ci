@@ -78,6 +78,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validate Terraform directory exists
+        run: |
+          set -euo pipefail
+          if [ ! -d "${{ inputs.terraform_workdir }}" ]; then
+            echo "::error::Terraform workdir '${{ inputs.terraform_workdir }}' does not exist in the repo."
+            echo "Set workflow input 'terraform_workdir' to the correct path or add the directory to the repo."
+            exit 1
+          fi
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
         with:
