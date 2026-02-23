@@ -11,19 +11,18 @@ on:
   workflow_dispatch:
     inputs:
       cookbook:
-        description: 'Cookbook to validate (optional, e.g., base_linux)'
+        description: 'Cookbook to validate (optional, e.g., sample_nginix)'
         required: false
       policyfile:
         description: 'Policyfile to deploy (name/path, e.g., hello_world.rb or sample_nginix)'
         required: false
-      canary_delay_hours:
-        description: 'Delay before canary promotion (hours)'
-        required: false
-        default: '2'
-      prod_delay_hours:
-        description: 'Delay before prod promotion (hours)'
-        required: false
-        default: '24'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mark-rollout-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   CHEF_LICENSE: accept-silent
@@ -63,12 +62,12 @@ jobs:
             )
           fi
 
-          if [ -z "$COOKBOOKS" ] || [ "$COOKBOOKS" == "[]" ]; then
+          if [ -z "$COOKBOOKS" ] || [ "$COOKBOOKS" = "[]" ]; then
             echo "No cookbooks detected"
             COOKBOOKS='[]'
           fi
 
-          echo "cookbooks=$COOKBOOKS" >> $GITHUB_OUTPUT
+          echo "cookbooks=$COOKBOOKS" >> "$GITHUB_OUTPUT"
           echo "Detected cookbooks: $COOKBOOKS"
 
   validate-versions:
@@ -93,9 +92,8 @@ jobs:
           CURRENT_VERSION=$(grep -E "^version" metadata.rb | head -1 | awk '{print $2}' | tr -d "'\"")
           echo "Current version: $CURRENT_VERSION"
 
-          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
             echo "Running on main branch - skipping version comparison"
-            echo "Version validation skipped for direct main push"
             exit 0
           fi
 
@@ -103,18 +101,13 @@ jobs:
             PREVIOUS_VERSION=$(git show origin/main:cookbooks/${{ matrix.cookbook }}/metadata.rb 2>/dev/null | grep -E "^version" | head -1 | awk '{print $2}' | tr -d "'\"")
             echo "Previous version (main): $PREVIOUS_VERSION"
 
-            if [ "$CURRENT_VERSION" == "$PREVIOUS_VERSION" ]; then
-              echo "ERROR: Version was not bumped!"
-              echo "Current: $CURRENT_VERSION"
-              echo "Previous: $PREVIOUS_VERSION"
-              echo "Please bump the version in metadata.rb before pushing"
+            if [ "$CURRENT_VERSION" = "$PREVIOUS_VERSION" ]; then
+              echo "ERROR: Version was not bumped."
               exit 1
-            else
-              echo "Version properly bumped from $PREVIOUS_VERSION to $CURRENT_VERSION"
             fi
+            echo "Version properly bumped from $PREVIOUS_VERSION to $CURRENT_VERSION"
           else
-            echo "New cookbook detected - this will be version $CURRENT_VERSION"
-            echo "First version is acceptable"
+            echo "New cookbook detected - first version is acceptable"
           fi
 
   detect-policyfiles:
@@ -133,22 +126,26 @@ jobs:
           INPUT_POLICYFILE="${{ github.event.inputs.policyfile }}"
 
           resolve_policyfile() {
-            local raw="$1"
-            local base stem
+            raw="$1"
             base="$(basename "$raw")"
             stem="${base%.rb}"
+            stem="${stem%.lock.json}"
 
             for candidate in \
               "$raw" \
               "$raw.rb" \
+              "$raw.lock.json" \
               "policyfiles/$raw" \
               "policyfiles/$raw.rb" \
+              "policyfiles/$raw.lock.json" \
               "policyfiles/$stem.rb" \
+              "policyfiles/$stem.lock.json" \
               "cookbooks/$raw/Policyfile.rb" \
-              "cookbooks/$stem/Policyfile.rb" \
               "cookbooks/$raw/Policyfile.lock.json" \
+              "cookbooks/$stem/Policyfile.rb" \
               "cookbooks/$stem/Policyfile.lock.json" \
-              "$raw/Policyfile.rb"
+              "$raw/Policyfile.rb" \
+              "$raw/Policyfile.lock.json"
             do
               if [ -f "$candidate" ]; then
                 echo "$candidate"
@@ -160,17 +157,14 @@ jobs:
           }
 
           if [ -n "$INPUT_POLICYFILE" ]; then
-            # Accept full path, root policyfiles name, cookbook name, or cookbook path.
             if ! RESOLVED_POLICYFILE=$(resolve_policyfile "$INPUT_POLICYFILE"); then
               echo "ERROR: Could not resolve policyfile input: $INPUT_POLICYFILE"
               echo "Try one of:"
-              echo "  - hello_world.rb"
-              echo "  - policyfiles/hello_world.rb"
               echo "  - sample_nginix"
+              echo "  - policyfiles/hello_world.rb"
               echo "  - cookbooks/sample_nginix/Policyfile.rb"
               exit 1
             fi
-
             POLICYFILES=$(printf '%s\n' "$RESOLVED_POLICYFILE" | jq -R -s -c 'split("\n")[:-1]')
           else
             if [ "${{ github.event_name }}" = "push" ] && [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
@@ -182,7 +176,7 @@ jobs:
             CHANGED_FILES=$(git diff --name-only "$DIFF_RANGE" 2>/dev/null || true)
             DIRECT_POLICYFILES=$(
               printf '%s\n' "$CHANGED_FILES" \
-                | awk '/^policyfiles\/[^/]+\.rb$/ || /^cookbooks\/[^/]+\/Policyfile\.rb$/' \
+                | awk '/^policyfiles\/[^/]+\.(rb|lock\.json)$/ || /^cookbooks\/[^/]+\/Policyfile\.(rb|lock\.json)$/' \
                 | sed '/^$/d' \
                 | sort -u
             )
@@ -205,12 +199,12 @@ jobs:
             )
           fi
 
-          if [ -z "$POLICYFILES" ] || [ "$POLICYFILES" == "[]" ]; then
+          if [ -z "$POLICYFILES" ] || [ "$POLICYFILES" = "[]" ]; then
             echo "No policyfiles detected"
             POLICYFILES='[]'
           fi
 
-          echo "policyfiles=$POLICYFILES" >> $GITHUB_OUTPUT
+          echo "policyfiles=$POLICYFILES" >> "$GITHUB_OUTPUT"
           echo "Detected policyfiles: $POLICYFILES"
 
   build-lockfiles:
@@ -222,6 +216,7 @@ jobs:
       matrix:
         policyfile: ${{ fromJson(needs.detect-policyfiles.outputs.policyfiles) }}
       fail-fast: false
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -229,21 +224,41 @@ jobs:
 
       - name: Install Chef Workstation
         run: |
-          echo "Installing Chef Workstation..."
           curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation -c stable
-          echo "/opt/chef-workstation/bin" >> $GITHUB_PATH
-          echo "Chef Workstation ready"
+          echo "/opt/chef-workstation/bin" >> "$GITHUB_PATH"
 
       - name: Build lockfile
         run: |
           set -euo pipefail
           POLICYFILE="${{ matrix.policyfile }}"
-          echo "Building lockfile for $POLICYFILE"
-          if [ ! -f "$POLICYFILE" ]; then
-            echo "ERROR: Policyfile not found at path $POLICYFILE"
-            exit 1
-          fi
+          echo "Building lockfile for: $POLICYFILE"
+          [ -f "$POLICYFILE" ] || { echo "ERROR: Policyfile not found at $POLICYFILE"; exit 1; }
           chef install "$POLICYFILE"
+
+      - name: Resolve lockfile metadata
+        id: meta
+        run: |
+          set -euo pipefail
+          POLICYFILE="${{ matrix.policyfile }}"
+          if [[ "$POLICYFILE" == *.rb ]]; then
+            LOCKFILE="${POLICYFILE%.rb}.lock.json"
+          else
+            LOCKFILE="$POLICYFILE"
+          fi
+          [ -f "$LOCKFILE" ] || { echo "ERROR: Lockfile not found at $LOCKFILE"; exit 1; }
+
+          SAFE_NAME="$(printf '%s' "$POLICYFILE" | tr '/.' '--' | tr -cd '[:alnum:]_-')"
+          [ -n "$SAFE_NAME" ] || SAFE_NAME="policyfile"
+          ARTIFACT_NAME="policy-lock-${SAFE_NAME}"
+
+          echo "lockfile_path=$LOCKFILE" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Upload lockfile artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.artifact_name }}
+          path: ${{ steps.meta.outputs.lockfile_path }}
 
   push-dev:
     name: Push Policy (dev)
@@ -254,6 +269,8 @@ jobs:
       matrix:
         policyfile: ${{ fromJson(needs.detect-policyfiles.outputs.policyfiles) }}
       fail-fast: false
+    environment: dev
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -261,10 +278,8 @@ jobs:
 
       - name: Install Chef Workstation
         run: |
-          echo "Installing Chef Workstation..."
           curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation -c stable
-          echo "/opt/chef-workstation/bin" >> $GITHUB_PATH
-          echo "Chef Workstation ready"
+          echo "/opt/chef-workstation/bin" >> "$GITHUB_PATH"
 
       - name: Configure Chef Credentials
         env:
@@ -284,34 +299,51 @@ jobs:
           EOF
           printf '%s' "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
           chmod 600 ~/.chef/ci-user.pem
-          echo "Chef credentials configured with SSL verification"
 
-      - name: Build lockfile for push
-        run: |
-          set -euo pipefail
-          POLICYFILE="${{ matrix.policyfile }}"
-          echo "Building lockfile for push: $POLICYFILE"
-          if [ ! -f "$POLICYFILE" ]; then
-            echo "ERROR: Policyfile not found at path $POLICYFILE"
-            exit 1
-          fi
-          chef install "$POLICYFILE"
-
-      - name: Push policy to dev
+      - name: Resolve lockfile metadata
+        id: meta
         run: |
           set -euo pipefail
           POLICYFILE="${{ matrix.policyfile }}"
           if [[ "$POLICYFILE" == *.rb ]]; then
-            PUSH_TARGET="${POLICYFILE%.rb}.lock.json"
+            LOCKFILE_PATH="${POLICYFILE%.rb}.lock.json"
           else
-            PUSH_TARGET="$POLICYFILE"
+            LOCKFILE_PATH="$POLICYFILE"
           fi
-          echo "Pushing policy to dev: $PUSH_TARGET"
-          chef push dev "$PUSH_TARGET"
-          echo "Dev push complete"
+          SAFE_NAME="$(printf '%s' "$POLICYFILE" | tr '/.' '--' | tr -cd '[:alnum:]_-')"
+          [ -n "$SAFE_NAME" ] || SAFE_NAME="policyfile"
+          ARTIFACT_NAME="policy-lock-${SAFE_NAME}"
+          echo "lockfile_path=$LOCKFILE_PATH" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
 
-  push-canary:
-    name: Push Policy (canary)
+      - name: Download lockfile artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.artifact_name }}
+          path: .
+
+      - name: Resolve downloaded lockfile path
+        id: lock
+        run: |
+          set -euo pipefail
+          EXPECTED_PATH="${{ steps.meta.outputs.lockfile_path }}"
+          LOCK_BASENAME="$(basename "$EXPECTED_PATH")"
+          if [ -f "$EXPECTED_PATH" ]; then
+            FOUND="$EXPECTED_PATH"
+          else
+            FOUND="$(find . -type f -name "$LOCK_BASENAME" | head -n1 || true)"
+          fi
+          [ -n "$FOUND" ] || { echo "ERROR: Unable to locate lockfile artifact $LOCK_BASENAME"; exit 1; }
+          echo "lockfile_path=$FOUND" >> "$GITHUB_OUTPUT"
+
+      - name: Push policy to dev
+        run: |
+          set -euo pipefail
+          echo "Pushing lockfile to dev: ${{ steps.lock.outputs.lockfile_path }}"
+          chef push dev "${{ steps.lock.outputs.lockfile_path }}"
+
+  push-test:
+    name: Push Policy (test)
     needs: [push-dev, detect-policyfiles]
     if: needs.detect-policyfiles.outputs.policyfiles != '[]'
     runs-on: ubuntu-latest
@@ -319,8 +351,8 @@ jobs:
       matrix:
         policyfile: ${{ fromJson(needs.detect-policyfiles.outputs.policyfiles) }}
       fail-fast: false
-    env:
-      CANARY_DELAY_HOURS: ${{ github.event.inputs.canary_delay_hours || '2' }}
+    environment: test
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -328,10 +360,8 @@ jobs:
 
       - name: Install Chef Workstation
         run: |
-          echo "Installing Chef Workstation..."
           curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation -c stable
-          echo "/opt/chef-workstation/bin" >> $GITHUB_PATH
-          echo "Chef Workstation ready"
+          echo "/opt/chef-workstation/bin" >> "$GITHUB_PATH"
 
       - name: Configure Chef Credentials
         env:
@@ -351,50 +381,60 @@ jobs:
           EOF
           printf '%s' "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
           chmod 600 ~/.chef/ci-user.pem
-          echo "Chef credentials configured with SSL verification"
 
-      - name: Build lockfile for push
-        run: |
-          set -euo pipefail
-          POLICYFILE="${{ matrix.policyfile }}"
-          echo "Building lockfile for push: $POLICYFILE"
-          if [ ! -f "$POLICYFILE" ]; then
-            echo "ERROR: Policyfile not found at path $POLICYFILE"
-            exit 1
-          fi
-          chef install "$POLICYFILE"
-
-      - name: Wait before canary promotion
-        if: env.CANARY_DELAY_HOURS != '0'
-        run: |
-          set -euo pipefail
-          echo "Waiting ${CANARY_DELAY_HOURS} hour(s) before canary promotion..."
-          sleep $((CANARY_DELAY_HOURS * 3600))
-
-      - name: Push policy to canary
+      - name: Resolve lockfile metadata
+        id: meta
         run: |
           set -euo pipefail
           POLICYFILE="${{ matrix.policyfile }}"
           if [[ "$POLICYFILE" == *.rb ]]; then
-            PUSH_TARGET="${POLICYFILE%.rb}.lock.json"
+            LOCKFILE_PATH="${POLICYFILE%.rb}.lock.json"
           else
-            PUSH_TARGET="$POLICYFILE"
+            LOCKFILE_PATH="$POLICYFILE"
           fi
-          echo "Pushing policy to canary: $PUSH_TARGET"
-          chef push canary "$PUSH_TARGET"
-          echo "Canary push complete"
+          SAFE_NAME="$(printf '%s' "$POLICYFILE" | tr '/.' '--' | tr -cd '[:alnum:]_-')"
+          [ -n "$SAFE_NAME" ] || SAFE_NAME="policyfile"
+          ARTIFACT_NAME="policy-lock-${SAFE_NAME}"
+          echo "lockfile_path=$LOCKFILE_PATH" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Download lockfile artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.artifact_name }}
+          path: .
+
+      - name: Resolve downloaded lockfile path
+        id: lock
+        run: |
+          set -euo pipefail
+          EXPECTED_PATH="${{ steps.meta.outputs.lockfile_path }}"
+          LOCK_BASENAME="$(basename "$EXPECTED_PATH")"
+          if [ -f "$EXPECTED_PATH" ]; then
+            FOUND="$EXPECTED_PATH"
+          else
+            FOUND="$(find . -type f -name "$LOCK_BASENAME" | head -n1 || true)"
+          fi
+          [ -n "$FOUND" ] || { echo "ERROR: Unable to locate lockfile artifact $LOCK_BASENAME"; exit 1; }
+          echo "lockfile_path=$FOUND" >> "$GITHUB_OUTPUT"
+
+      - name: Push policy to test
+        run: |
+          set -euo pipefail
+          echo "Pushing lockfile to test: ${{ steps.lock.outputs.lockfile_path }}"
+          chef push test "${{ steps.lock.outputs.lockfile_path }}"
 
   push-prod:
     name: Push Policy (prod)
-    needs: [push-canary, detect-policyfiles]
+    needs: [push-test, detect-policyfiles]
     if: needs.detect-policyfiles.outputs.policyfiles != '[]'
     runs-on: ubuntu-latest
     strategy:
       matrix:
         policyfile: ${{ fromJson(needs.detect-policyfiles.outputs.policyfiles) }}
       fail-fast: false
-    env:
-      PROD_DELAY_HOURS: ${{ github.event.inputs.prod_delay_hours || '24' }}
+    environment: prod
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -402,10 +442,8 @@ jobs:
 
       - name: Install Chef Workstation
         run: |
-          echo "Installing Chef Workstation..."
           curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation -c stable
-          echo "/opt/chef-workstation/bin" >> $GITHUB_PATH
-          echo "Chef Workstation ready"
+          echo "/opt/chef-workstation/bin" >> "$GITHUB_PATH"
 
       - name: Configure Chef Credentials
         env:
@@ -425,35 +463,45 @@ jobs:
           EOF
           printf '%s' "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
           chmod 600 ~/.chef/ci-user.pem
-          echo "Chef credentials configured with SSL verification"
 
-      - name: Build lockfile for push
-        run: |
-          set -euo pipefail
-          POLICYFILE="${{ matrix.policyfile }}"
-          echo "Building lockfile for push: $POLICYFILE"
-          if [ ! -f "$POLICYFILE" ]; then
-            echo "ERROR: Policyfile not found at path $POLICYFILE"
-            exit 1
-          fi
-          chef install "$POLICYFILE"
-
-      - name: Wait before prod promotion
-        if: env.PROD_DELAY_HOURS != '0'
-        run: |
-          set -euo pipefail
-          echo "Waiting ${PROD_DELAY_HOURS} hour(s) before prod promotion..."
-          sleep $((PROD_DELAY_HOURS * 3600))
-
-      - name: Push policy to prod
+      - name: Resolve lockfile metadata
+        id: meta
         run: |
           set -euo pipefail
           POLICYFILE="${{ matrix.policyfile }}"
           if [[ "$POLICYFILE" == *.rb ]]; then
-            PUSH_TARGET="${POLICYFILE%.rb}.lock.json"
+            LOCKFILE_PATH="${POLICYFILE%.rb}.lock.json"
           else
-            PUSH_TARGET="$POLICYFILE"
+            LOCKFILE_PATH="$POLICYFILE"
           fi
-          echo "Pushing policy to prod: $PUSH_TARGET"
-          chef push prod "$PUSH_TARGET"
-          echo "Prod push complete"
+          SAFE_NAME="$(printf '%s' "$POLICYFILE" | tr '/.' '--' | tr -cd '[:alnum:]_-')"
+          [ -n "$SAFE_NAME" ] || SAFE_NAME="policyfile"
+          ARTIFACT_NAME="policy-lock-${SAFE_NAME}"
+          echo "lockfile_path=$LOCKFILE_PATH" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Download lockfile artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.artifact_name }}
+          path: .
+
+      - name: Resolve downloaded lockfile path
+        id: lock
+        run: |
+          set -euo pipefail
+          EXPECTED_PATH="${{ steps.meta.outputs.lockfile_path }}"
+          LOCK_BASENAME="$(basename "$EXPECTED_PATH")"
+          if [ -f "$EXPECTED_PATH" ]; then
+            FOUND="$EXPECTED_PATH"
+          else
+            FOUND="$(find . -type f -name "$LOCK_BASENAME" | head -n1 || true)"
+          fi
+          [ -n "$FOUND" ] || { echo "ERROR: Unable to locate lockfile artifact $LOCK_BASENAME"; exit 1; }
+          echo "lockfile_path=$FOUND" >> "$GITHUB_OUTPUT"
+
+      - name: Push policy to prod
+        run: |
+          set -euo pipefail
+          echo "Pushing lockfile to prod: ${{ steps.lock.outputs.lockfile_path }}"
+          chef push prod "${{ steps.lock.outputs.lockfile_path }}"
