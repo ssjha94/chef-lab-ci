@@ -42,10 +42,25 @@ jobs:
       - name: Detect modified cookbooks
         id: detect
         run: |
-          if [ -n "${{ github.event.inputs.cookbook }}" ]; then
-            COOKBOOKS='["${{ github.event.inputs.cookbook }}"]'
+          INPUT_COOKBOOK="${{ github.event.inputs.cookbook }}"
+
+          if [ -n "$INPUT_COOKBOOK" ]; then
+            COOKBOOKS=$(printf '%s\n' "$INPUT_COOKBOOK" | jq -R -s -c 'split("\n")[:-1]')
           else
-            COOKBOOKS=$(git diff origin/main...HEAD --name-only 2>/dev/null | grep '^cookbooks/' | cut -d'/' -f2 | sort -u | jq -R -s -c 'split("\n")[:-1]')
+            if [ "${{ github.event_name }}" = "push" ] && [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+              DIFF_RANGE="${{ github.event.before }}...${{ github.sha }}"
+            else
+              DIFF_RANGE="HEAD~1...HEAD"
+            fi
+
+            CHANGED_FILES=$(git diff --name-only "$DIFF_RANGE" 2>/dev/null || true)
+            COOKBOOKS=$(
+              printf '%s\n' "$CHANGED_FILES" \
+                | awk -F/ '/^cookbooks\/[^/]+\// {print $2}' \
+                | sed '/^$/d' \
+                | sort -u \
+                | jq -R -s -c 'split("\n")[:-1]'
+            )
           fi
 
           if [ -z "$COOKBOOKS" ] || [ "$COOKBOOKS" == "[]" ]; then
@@ -84,8 +99,8 @@ jobs:
             exit 0
           fi
 
-          if git show main:cookbooks/${{ matrix.cookbook }}/metadata.rb >/dev/null 2>&1; then
-            PREVIOUS_VERSION=$(git show main:cookbooks/${{ matrix.cookbook }}/metadata.rb 2>/dev/null | grep -E "^version" | head -1 | awk '{print $2}' | tr -d "'\"")
+          if git show origin/main:cookbooks/${{ matrix.cookbook }}/metadata.rb >/dev/null 2>&1; then
+            PREVIOUS_VERSION=$(git show origin/main:cookbooks/${{ matrix.cookbook }}/metadata.rb 2>/dev/null | grep -E "^version" | head -1 | awk '{print $2}' | tr -d "'\"")
             echo "Previous version (main): $PREVIOUS_VERSION"
 
             if [ "$CURRENT_VERSION" == "$PREVIOUS_VERSION" ]; then
@@ -117,34 +132,76 @@ jobs:
         run: |
           INPUT_POLICYFILE="${{ github.event.inputs.policyfile }}"
 
+          resolve_policyfile() {
+            local raw="$1"
+            local base stem
+            base="$(basename "$raw")"
+            stem="${base%.rb}"
+
+            for candidate in \
+              "$raw" \
+              "$raw.rb" \
+              "policyfiles/$raw" \
+              "policyfiles/$raw.rb" \
+              "policyfiles/$stem.rb" \
+              "cookbooks/$raw/Policyfile.rb" \
+              "cookbooks/$stem/Policyfile.rb" \
+              "cookbooks/$raw/Policyfile.lock.json" \
+              "cookbooks/$stem/Policyfile.lock.json" \
+              "$raw/Policyfile.rb"
+            do
+              if [ -f "$candidate" ]; then
+                echo "$candidate"
+                return 0
+              fi
+            done
+
+            return 1
+          }
+
           if [ -n "$INPUT_POLICYFILE" ]; then
-            # Accept full relative path, name in policyfiles/, or cookbook name.
-            if [ -f "$INPUT_POLICYFILE" ]; then
-              RESOLVED_POLICYFILE="$INPUT_POLICYFILE"
-            elif [ -f "policyfiles/$INPUT_POLICYFILE" ]; then
-              RESOLVED_POLICYFILE="policyfiles/$INPUT_POLICYFILE"
-            elif [ -f "policyfiles/${INPUT_POLICYFILE%.rb}.rb" ]; then
-              RESOLVED_POLICYFILE="policyfiles/${INPUT_POLICYFILE%.rb}.rb"
-            elif [ -f "cookbooks/$INPUT_POLICYFILE/Policyfile.rb" ]; then
-              RESOLVED_POLICYFILE="cookbooks/$INPUT_POLICYFILE/Policyfile.rb"
-            elif [ -f "cookbooks/$INPUT_POLICYFILE/Policyfile.lock.json" ]; then
-              RESOLVED_POLICYFILE="cookbooks/$INPUT_POLICYFILE/Policyfile.lock.json"
-            else
+            # Accept full path, root policyfiles name, cookbook name, or cookbook path.
+            if ! RESOLVED_POLICYFILE=$(resolve_policyfile "$INPUT_POLICYFILE"); then
               echo "ERROR: Could not resolve policyfile input: $INPUT_POLICYFILE"
               echo "Try one of:"
-              echo "  - policyfiles/<name>.rb"
-              echo "  - cookbooks/<cookbook>/Policyfile.rb"
-              echo "  - <cookbook> (for cookbooks/<cookbook>/Policyfile.rb)"
+              echo "  - hello_world.rb"
+              echo "  - policyfiles/hello_world.rb"
+              echo "  - sample_nginix"
+              echo "  - cookbooks/sample_nginix/Policyfile.rb"
               exit 1
             fi
 
             POLICYFILES=$(printf '%s\n' "$RESOLVED_POLICYFILE" | jq -R -s -c 'split("\n")[:-1]')
           else
+            if [ "${{ github.event_name }}" = "push" ] && [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+              DIFF_RANGE="${{ github.event.before }}...${{ github.sha }}"
+            else
+              DIFF_RANGE="HEAD~1...HEAD"
+            fi
+
+            CHANGED_FILES=$(git diff --name-only "$DIFF_RANGE" 2>/dev/null || true)
+            DIRECT_POLICYFILES=$(
+              printf '%s\n' "$CHANGED_FILES" \
+                | awk '/^policyfiles\/[^/]+\.rb$/ || /^cookbooks\/[^/]+\/Policyfile\.rb$/' \
+                | sed '/^$/d' \
+                | sort -u
+            )
+            COOKBOOK_POLICYFILES=$(
+              printf '%s\n' "$CHANGED_FILES" \
+                | awk -F/ '/^cookbooks\/[^/]+\// {print $2}' \
+                | sed '/^$/d' \
+                | sort -u \
+                | while read -r cookbook; do
+                    candidate="cookbooks/${cookbook}/Policyfile.rb"
+                    [ -f "$candidate" ] && echo "$candidate"
+                  done \
+                | sort -u
+            )
             POLICYFILES=$(
-              {
-                find policyfiles -maxdepth 1 -type f -name '*.rb' -print 2>/dev/null
-                find cookbooks -mindepth 2 -maxdepth 2 -type f -name 'Policyfile.rb' -print 2>/dev/null
-              } | sort -u | jq -R -s -c 'split("\n")[:-1]'
+              printf '%s\n%s\n' "$DIRECT_POLICYFILES" "$COOKBOOK_POLICYFILES" \
+                | sed '/^$/d' \
+                | sort -u \
+                | jq -R -s -c 'split("\n")[:-1]'
             )
           fi
 
@@ -159,7 +216,7 @@ jobs:
   build-lockfiles:
     name: Build Policy Lockfiles
     needs: [detect-policyfiles, validate-versions]
-    if: needs.detect-policyfiles.outputs.policyfiles != '[]'
+    if: needs.detect-policyfiles.outputs.policyfiles != '[]' && (needs.validate-versions.result == 'success' || needs.validate-versions.result == 'skipped')
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -215,16 +272,17 @@ jobs:
           CHEF_ORG: ${{ secrets.CHEF_ORG }}
           CHEF_USER: ${{ secrets.CHEF_USER }}
           CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+          CHEF_SSL_VERIFY: ${{ secrets.CHEF_SSL_VERIFY }}
         run: |
           mkdir -p ~/.chef
-          cat > ~/.chef/knife.rb <<EOF
-          node_name        "${CHEF_USER}"
-          client_key       "${HOME}/.chef/ci-user.pem"
-          chef_server_url  "${CHEF_SERVER_URL}"
-          org_name         "${CHEF_ORG}"
-          ssl_verify_mode  :verify_peer
+          cat > ~/.chef/knife.rb <<'EOF'
+          chef_server_url  ENV['CHEF_SERVER_URL']
+          node_name        ENV['CHEF_USER']
+          client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
+          org_name         ENV['CHEF_ORG'] if ENV['CHEF_ORG']
+          ssl_verify_mode  (ENV['CHEF_SSL_VERIFY'] || ':verify_peer')
           EOF
-          echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
+          printf '%s' "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
           chmod 600 ~/.chef/ci-user.pem
           echo "Chef credentials configured with SSL verification"
 
@@ -281,16 +339,17 @@ jobs:
           CHEF_ORG: ${{ secrets.CHEF_ORG }}
           CHEF_USER: ${{ secrets.CHEF_USER }}
           CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+          CHEF_SSL_VERIFY: ${{ secrets.CHEF_SSL_VERIFY }}
         run: |
           mkdir -p ~/.chef
-          cat > ~/.chef/knife.rb <<EOF
-          node_name        "${CHEF_USER}"
-          client_key       "${HOME}/.chef/ci-user.pem"
-          chef_server_url  "${CHEF_SERVER_URL}"
-          org_name         "${CHEF_ORG}"
-          ssl_verify_mode  :verify_peer
+          cat > ~/.chef/knife.rb <<'EOF'
+          chef_server_url  ENV['CHEF_SERVER_URL']
+          node_name        ENV['CHEF_USER']
+          client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
+          org_name         ENV['CHEF_ORG'] if ENV['CHEF_ORG']
+          ssl_verify_mode  (ENV['CHEF_SSL_VERIFY'] || ':verify_peer')
           EOF
-          echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
+          printf '%s' "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
           chmod 600 ~/.chef/ci-user.pem
           echo "Chef credentials configured with SSL verification"
 
@@ -354,16 +413,17 @@ jobs:
           CHEF_ORG: ${{ secrets.CHEF_ORG }}
           CHEF_USER: ${{ secrets.CHEF_USER }}
           CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+          CHEF_SSL_VERIFY: ${{ secrets.CHEF_SSL_VERIFY }}
         run: |
           mkdir -p ~/.chef
-          cat > ~/.chef/knife.rb <<EOF
-          node_name        "${CHEF_USER}"
-          client_key       "${HOME}/.chef/ci-user.pem"
-          chef_server_url  "${CHEF_SERVER_URL}"
-          org_name         "${CHEF_ORG}"
-          ssl_verify_mode  :verify_peer
+          cat > ~/.chef/knife.rb <<'EOF'
+          chef_server_url  ENV['CHEF_SERVER_URL']
+          node_name        ENV['CHEF_USER']
+          client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
+          org_name         ENV['CHEF_ORG'] if ENV['CHEF_ORG']
+          ssl_verify_mode  (ENV['CHEF_SSL_VERIFY'] || ':verify_peer')
           EOF
-          echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
+          printf '%s' "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
           chmod 600 ~/.chef/ci-user.pem
           echo "Chef credentials configured with SSL verification"
 
