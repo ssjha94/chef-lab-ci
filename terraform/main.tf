@@ -47,6 +47,17 @@ variable "chef_org" {
   type        = string
 }
 
+variable "ssh_key_name" {
+  description = "Existing EC2 key pair name for SSH access"
+  type        = string
+}
+
+variable "run_id" {
+  description = "Unique identifier for this provisioning run"
+  type        = string
+  default     = "manual"
+}
+
 # Data source: Find latest Ubuntu 22.04 AMI
 data "aws_ami" "ubuntu" {
   most_recent = true
@@ -63,9 +74,13 @@ data "aws_ami" "ubuntu" {
   }
 }
 
+data "aws_key_pair" "bootstrap" {
+  key_name = var.ssh_key_name
+}
+
 # Security group for Chef nodes
 resource "aws_security_group" "chef_nodes" {
-  name        = "chef-nodes-${var.policy_group}-sg"
+  name        = "chef-nodes-${var.policy_group}-${var.run_id}-sg"
   description = "Security group for Chef nodes (${var.policy_group})"
 
   ingress {
@@ -97,59 +112,28 @@ resource "aws_security_group" "chef_nodes" {
   }
 
   tags = {
-    Name        = "chef-nodes-${var.policy_group}"
+    Name        = "chef-nodes-${var.policy_group}-${var.run_id}"
     Environment = var.policy_group
+    RunId       = var.run_id
   }
-}
-
-# Read client.pem files from client-keys directory
-locals {
-  client_keys = {
-    for file in fileset("${path.module}/client-keys", "node-*.pem") :
-    trimsuffix(file, ".pem") => file(lookup(
-      {
-        for f in fileset("${path.module}/client-keys", "node-*.pem") :
-        trimsuffix(f, ".pem") => "${path.module}/client-keys/${f}"
-      },
-      trimsuffix(file, ".pem"),
-      ""
-    ))
-  }
-}
-
-# user_data script template
-locals {
-  user_data_template = base64encode(templatefile("${path.module}/user-data.sh", {
-    chef_server_url = var.chef_server_url
-    chef_org        = var.chef_org
-    policy_group    = var.policy_group
-    client_pem      = ""  # Will be injected per instance
-  }))
 }
 
 # EC2 instances
 resource "aws_instance" "chef_nodes" {
-  count                = var.node_count
-  ami                  = data.aws_ami.ubuntu.id
-  instance_type        = var.instance_type
-  security_groups      = [aws_security_group.chef_nodes.name]
+  count                       = var.node_count
+  ami                         = data.aws_ami.ubuntu.id
+  instance_type               = var.instance_type
+  key_name                    = data.aws_key_pair.bootstrap.key_name
+  security_groups             = [aws_security_group.chef_nodes.name]
   associate_public_ip_address = true
 
-  # Inject user_data with client.pem for this specific node
-  user_data = base64encode(templatefile("${path.module}/user-data.sh", {
-    chef_server_url = var.chef_server_url
-    chef_org        = var.chef_org
-    policy_group    = var.policy_group
-    client_pem      = try(
-      values(local.client_keys)[count.index],
-      ""
-    )
-  }))
+  user_data = filebase64("${path.module}/user-data.sh")
 
   tags = {
-    Name        = "chef-node-${var.policy_group}-${count.index + 1}"
+    Name        = "chef-node-${var.policy_group}-${var.run_id}-${count.index + 1}"
     Environment = var.policy_group
     ManagedBy   = "Terraform"
+    RunId       = var.run_id
   }
 
   depends_on = [aws_security_group.chef_nodes]
@@ -170,10 +154,10 @@ output "instance_details" {
   description = "Details of all provisioned instances"
   value = [
     for instance in aws_instance.chef_nodes : {
-      id            = instance.id
-      public_ip     = instance.public_ip
-      private_ip    = instance.private_ip
-      tags          = instance.tags
+      id         = instance.id
+      public_ip  = instance.public_ip
+      private_ip = instance.private_ip
+      tags       = instance.tags
     }
   ]
 }

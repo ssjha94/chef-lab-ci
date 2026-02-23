@@ -23,6 +23,11 @@ on:
         required: false
         default: "ap-northeast-3"
         type: string
+      terraform_state_key:
+        description: "Optional Terraform S3 state key. If empty, defaults to chef-bootstrap/<policy_group>/terraform.tfstate"
+        required: false
+        default: ""
+        type: string
       target_hosts:
         description: "Hosts to bootstrap (comma/space/newline separated). Leave empty when using Terraform provisioning."
         required: false
@@ -93,6 +98,22 @@ jobs:
           terraform_version: "1.6.0"
           terraform_wrapper: false
 
+      - name: Validate Terraform secrets
+        env:
+          AWS_SSH_KEY_NAME: ${{ secrets.AWS_SSH_KEY_NAME }}
+          TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AWS_SSH_KEY_NAME:-}" ]; then
+            echo "Missing required secret: AWS_SSH_KEY_NAME"
+            exit 1
+          fi
+          if [ -z "${TF_STATE_BUCKET:-}" ]; then
+            echo "Missing required secret: TF_STATE_BUCKET"
+            echo "Set an S3 bucket for Terraform remote state."
+            exit 1
+          fi
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -101,14 +122,36 @@ jobs:
           aws-region: ${{ inputs.aws_region }}
 
       - name: Terraform init
+        env:
+          TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+          TF_STATE_DYNAMODB_TABLE: ${{ secrets.TF_STATE_DYNAMODB_TABLE }}
         working-directory: ${{ inputs.terraform_workdir }}
-        run: terraform init
+        run: |
+          set -euo pipefail
+          state_key='${{ inputs.terraform_state_key }}'
+          if [ -z "${state_key}" ]; then
+            state_key="chef-bootstrap/${{ inputs.policy_group }}/terraform.tfstate"
+          fi
+          init_args=(
+            -backend-config="bucket=${TF_STATE_BUCKET}"
+            -backend-config="key=${state_key}"
+            -backend-config="region=${{ inputs.aws_region }}"
+            -backend-config="encrypt=true"
+          )
+          if [ -n "${TF_STATE_DYNAMODB_TABLE:-}" ]; then
+            init_args+=(-backend-config="dynamodb_table=${TF_STATE_DYNAMODB_TABLE}")
+          fi
+          terraform init -reconfigure "${init_args[@]}"
 
       - name: Install SSH key for Terraform provisioner
         env:
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
         run: |
           set -euo pipefail
+          if [ -z "${EC2_SSH_KEY:-}" ]; then
+            echo "Missing required secret: EC2_SSH_KEY"
+            exit 1
+          fi
           mkdir -p ~/.ssh
           echo "${EC2_SSH_KEY}" > ~/.ssh/ec2.pem
           chmod 600 ~/.ssh/ec2.pem
@@ -155,7 +198,7 @@ jobs:
             echo "Waiting for SSH on ${host}..."
             for i in $(seq 1 30); do
               if ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new \
-                     -i ~/.ssh/ec2.pem ubuntu@"${host}" 'echo ok' 2>/dev/null; then
+                     -i ~/.ssh/ec2.pem "${{ inputs.ssh_user }}"@"${host}" 'echo ok' 2>/dev/null; then
                 echo "  ${host} is SSH-ready"
                 break
               fi
