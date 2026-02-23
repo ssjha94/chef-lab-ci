@@ -1,0 +1,51 @@
+{
+  "revision_id": "f6d4131f0e6a1b562dcefb69dc22b5a3378c2e12c251c1fc81fd9987225643ae",
+  "name": "nginx_yaml_recipe",
+  "run_list": [
+    "recipe[nginx_yaml_recipe::default]"
+  ],
+  "included_policy_locks": [
+
+  ],
+  "cookbook_locks": {
+    "nginx_yaml_recipe": {
+      "version": "0.1.0",
+      "identifier": "df1cc3a57af8294edc88b0336a04f3638b6c440d",
+      "dotted_decimal_identifier": "62800546426976297.22197527813253636.267608866440205",
+      "source": "../cookbooks/nginx_yaml_recipe",
+      "cache_key": null,
+      "scm_info": {
+        "scm": "git",
+        "remote": null,
+        "revision": null,
+        "working_tree_clean": true,
+        "published": false,
+        "synchronized_remote_branches": [
+
+        ]
+      },
+      "source_options": {
+        "path": "../cookbooks/nginx_yaml_recipe"
+      }
+    }
+  },
+  "default_attributes": {
+
+  },
+  "override_attributes": {
+
+  },
+  "solution_dependencies": {
+    "Policyfile": [
+      [
+        "nginx_yaml_recipe",
+        ">= 0.0.0"
+      ]
+    ],
+    "dependencies": {
+      "nginx_yaml_recipe (0.1.0)": [
+
+      ]
+    }
+  }
+}

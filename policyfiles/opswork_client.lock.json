@@ -1,0 +1,51 @@
+{
+  "revision_id": "27eb73d915e52f67df7c8e856139d5f28d5d4bf1f605ad1eb24451cd5cc20093",
+  "name": "opswork_client",
+  "run_list": [
+    "recipe[opswork_client::default]"
+  ],
+  "included_policy_locks": [
+
+  ],
+  "cookbook_locks": {
+    "opswork_client": {
+      "version": "0.1.0",
+      "identifier": "64085e83141ea966d42b552c0462a7b4b1f1315e",
+      "dotted_decimal_identifier": "28156699690147497.28943730202117218.184394521325918",
+      "source": "../cookbooks/opswork_client",
+      "cache_key": null,
+      "scm_info": {
+        "scm": "git",
+        "remote": null,
+        "revision": null,
+        "working_tree_clean": true,
+        "published": false,
+        "synchronized_remote_branches": [
+
+        ]
+      },
+      "source_options": {
+        "path": "../cookbooks/opswork_client"
+      }
+    }
+  },
+  "default_attributes": {
+
+  },
+  "override_attributes": {
+
+  },
+  "solution_dependencies": {
+    "Policyfile": [
+      [
+        "opswork_client",
+        ">= 0.0.0"
+      ]
+    ],
+    "dependencies": {
+      "opswork_client (0.1.0)": [
+
+      ]
+    }
+  }
+}

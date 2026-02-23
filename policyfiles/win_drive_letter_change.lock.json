@@ -1,0 +1,51 @@
+{
+  "revision_id": "04ff80aa268f7223c36d0f4cbd1b06e33dcfd3bef6fec416ea2bafd2109cb044",
+  "name": "win_drive_letter_change",
+  "run_list": [
+    "recipe[win_drive_letter_change::default]"
+  ],
+  "included_policy_locks": [
+
+  ],
+  "cookbook_locks": {
+    "win_drive_letter_change": {
+      "version": "0.1.0",
+      "identifier": "838e34d63567e9831b5178d287569c541c481f3a",
+      "dotted_decimal_identifier": "37029579532363753.36903258682459990.171885065674554",
+      "source": "../cookbooks/win_drive_letter_change",
+      "cache_key": null,
+      "scm_info": {
+        "scm": "git",
+        "remote": null,
+        "revision": null,
+        "working_tree_clean": true,
+        "published": false,
+        "synchronized_remote_branches": [
+
+        ]
+      },
+      "source_options": {
+        "path": "../cookbooks/win_drive_letter_change"
+      }
+    }
+  },
+  "default_attributes": {
+
+  },
+  "override_attributes": {
+
+  },
+  "solution_dependencies": {
+    "Policyfile": [
+      [
+        "win_drive_letter_change",
+        ">= 0.0.0"
+      ]
+    ],
+    "dependencies": {
+      "win_drive_letter_change (0.1.0)": [
+
+      ]
+    }
+  }
+}

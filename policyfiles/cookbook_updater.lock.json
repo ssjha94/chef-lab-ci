@@ -1,0 +1,51 @@
+{
+  "revision_id": "45775b008c2879cbde9e77583ca59f8b7f350359148d98e2de37de5b5539e52f",
+  "name": "cookbook_updater",
+  "run_list": [
+    "recipe[chef_client_updater::default]"
+  ],
+  "included_policy_locks": [
+
+  ],
+  "cookbook_locks": {
+    "chef_client_updater": {
+      "version": "3.12.2",
+      "identifier": "eee5ca7d7e0f5c036524dc2702518ffd93353f83",
+      "dotted_decimal_identifier": "67243702308704092.955633916904017.158319259238275",
+      "source": "../cookbooks/chef_client_updater",
+      "cache_key": null,
+      "scm_info": {
+        "scm": "git",
+        "remote": null,
+        "revision": null,
+        "working_tree_clean": true,
+        "published": false,
+        "synchronized_remote_branches": [
+
+        ]
+      },
+      "source_options": {
+        "path": "../cookbooks/chef_client_updater"
+      }
+    }
+  },
+  "default_attributes": {
+
+  },
+  "override_attributes": {
+
+  },
+  "solution_dependencies": {
+    "Policyfile": [
+      [
+        "chef_client_updater",
+        ">= 0.0.0"
+      ]
+    ],
+    "dependencies": {
+      "chef_client_updater (3.12.2)": [
+
+      ]
+    }
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "revision_id": "d03ac2ef73fca04b624a2136d0464a22027cee026bcd83042b1dcbfa1acf155e",
+  "name": "notepad",
+  "run_list": [
+    "recipe[notepad::default]"
+  ],
+  "included_policy_locks": [
+
+  ],
+  "cookbook_locks": {
+    "notepad": {
+      "version": "1.7.0",
+      "identifier": "7fc2ffdf27458b0c385b317e643bcff490e0a08c",
+      "dotted_decimal_identifier": "35961726258595211.3439664044074043.228649309610124",
+      "source": "../cookbooks/notepad",
+      "cache_key": null,
+      "scm_info": {
+        "scm": "git",
+        "remote": null,
+        "revision": null,
+        "working_tree_clean": true,
+        "published": false,
+        "synchronized_remote_branches": [
+
+        ]
+      },
+      "source_options": {
+        "path": "../cookbooks/notepad"
+      }
+    }
+  },
+  "default_attributes": {
+
+  },
+  "override_attributes": {
+
+  },
+  "solution_dependencies": {
+    "Policyfile": [
+      [
+        "notepad",
+        ">= 0.0.0"
+      ]
+    ],
+    "dependencies": {
+      "notepad (1.7.0)": [
+
+      ]
+    }
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "revision_id": "661f80bf3f25a81bf93ed5828ba41980b42d9e53d6da621908acee318d75fbb5",
+  "name": "azure_test",
+  "run_list": [
+    "recipe[azure_test::default]"
+  ],
+  "included_policy_locks": [
+
+  ],
+  "cookbook_locks": {
+    "azure_test": {
+      "version": "0.1.0",
+      "identifier": "ad0a7f718209505f3cb71b5326f39578109cdbd2",
+      "dotted_decimal_identifier": "48706713452415312.26806879922628339.164342907329490",
+      "source": "../cookbooks/azure_test",
+      "cache_key": null,
+      "scm_info": {
+        "scm": "git",
+        "remote": null,
+        "revision": null,
+        "working_tree_clean": true,
+        "published": false,
+        "synchronized_remote_branches": [
+
+        ]
+      },
+      "source_options": {
+        "path": "../cookbooks/azure_test"
+      }
+    }
+  },
+  "default_attributes": {
+
+  },
+  "override_attributes": {
+
+  },
+  "solution_dependencies": {
+    "Policyfile": [
+      [
+        "azure_test",
+        ">= 0.0.0"
+      ]
+    ],
+    "dependencies": {
+      "azure_test (0.1.0)": [
+
+      ]
+    }
+  }
+}

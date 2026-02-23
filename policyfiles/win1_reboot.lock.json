@@ -1,0 +1,51 @@
+{
+  "revision_id": "0e5ef0af33d7353010102c804ffe4640c7ea056274a9f0a5691a69c4c0342ee9",
+  "name": "win1_reboot",
+  "run_list": [
+    "recipe[win1_reboot::default]"
+  ],
+  "included_policy_locks": [
+
+  ],
+  "cookbook_locks": {
+    "win1_reboot": {
+      "version": "0.1.0",
+      "identifier": "cca296f4e04e384a55d6ddf4f6cf3085a48e390b",
+      "dotted_decimal_identifier": "57599664486108728.20923529611769551.53350549567755",
+      "source": "../cookbooks/win1_reboot",
+      "cache_key": null,
+      "scm_info": {
+        "scm": "git",
+        "remote": null,
+        "revision": null,
+        "working_tree_clean": true,
+        "published": false,
+        "synchronized_remote_branches": [
+
+        ]
+      },
+      "source_options": {
+        "path": "../cookbooks/win1_reboot"
+      }
+    }
+  },
+  "default_attributes": {
+
+  },
+  "override_attributes": {
+
+  },
+  "solution_dependencies": {
+    "Policyfile": [
+      [
+        "win1_reboot",
+        ">= 0.0.0"
+      ]
+    ],
+    "dependencies": {
+      "win1_reboot (0.1.0)": [
+
+      ]
+    }
+  }
+}

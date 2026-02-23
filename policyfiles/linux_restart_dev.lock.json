@@ -1,0 +1,51 @@
+{
+  "revision_id": "7c9729a3d723c1902e5e64c82c404d360126caf9344831bbd717dee15e79943c",
+  "name": "linux_restart_dev",
+  "run_list": [
+    "recipe[linux_restart_dev::default]"
+  ],
+  "included_policy_locks": [
+
+  ],
+  "cookbook_locks": {
+    "linux_restart_dev": {
+      "version": "0.1.0",
+      "identifier": "70880d6f45e619c0bfe11997297c1db112b50e22",
+      "dotted_decimal_identifier": "31674788674397721.54254169046329724.32646360272418",
+      "source": "../cookbooks/linux_restart_dev",
+      "cache_key": null,
+      "scm_info": {
+        "scm": "git",
+        "remote": null,
+        "revision": null,
+        "working_tree_clean": true,
+        "published": false,
+        "synchronized_remote_branches": [
+
+        ]
+      },
+      "source_options": {
+        "path": "../cookbooks/linux_restart_dev"
+      }
+    }
+  },
+  "default_attributes": {
+
+  },
+  "override_attributes": {
+
+  },
+  "solution_dependencies": {
+    "Policyfile": [
+      [
+        "linux_restart_dev",
+        ">= 0.0.0"
+      ]
+    ],
+    "dependencies": {
+      "linux_restart_dev (0.1.0)": [
+
+      ]
+    }
+  }
+}

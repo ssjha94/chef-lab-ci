@@ -1,0 +1,51 @@
+{
+  "revision_id": "e10b4bf5eaa8f83bb171a9d4aa3944fe06b4ea04589b6df26e1955f93a015a6d",
+  "name": "test2comp",
+  "run_list": [
+    "recipe[test2comp::default]"
+  ],
+  "included_policy_locks": [
+
+  ],
+  "cookbook_locks": {
+    "test2comp": {
+      "version": "0.2.0",
+      "identifier": "e797d7759a091f8b79f781e5cfbfd05da8ced2d5",
+      "dotted_decimal_identifier": "65187671266953503.39259125705985983.229100682662613",
+      "source": "../cookbooks/test2comp",
+      "cache_key": null,
+      "scm_info": {
+        "scm": "git",
+        "remote": null,
+        "revision": null,
+        "working_tree_clean": true,
+        "published": false,
+        "synchronized_remote_branches": [
+
+        ]
+      },
+      "source_options": {
+        "path": "../cookbooks/test2comp"
+      }
+    }
+  },
+  "default_attributes": {
+
+  },
+  "override_attributes": {
+
+  },
+  "solution_dependencies": {
+    "Policyfile": [
+      [
+        "test2comp",
+        ">= 0.0.0"
+      ]
+    ],
+    "dependencies": {
+      "test2comp (0.2.0)": [
+
+      ]
+    }
+  }
+}

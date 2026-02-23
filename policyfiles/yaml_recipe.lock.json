@@ -1,0 +1,52 @@
+{
+  "revision_id": "32088f6618dc89b0cca73fd2652022bd6ccf59d468bb5958abfb9d3edbc390b6",
+  "name": "yaml_recipe",
+  "run_list": [
+    "recipe[demo_yaml_chef_infra::default]"
+  ],
+  "included_policy_locks": [
+
+  ],
+  "cookbook_locks": {
+    "demo_yaml_chef_infra": {
+      "version": "0.1.0",
+      "identifier": "f6e62a665193ca7fc482f5514685e2aa05ba5162",
+      "dotted_decimal_identifier": "69495914050458570.35963388782790277.249219868414306",
+      "source": "../cookbooks/demo_yaml_chef_infra",
+      "cache_key": null,
+      "scm_info": {
+        "scm": "git",
+        "remote": "https://github.com/collinmcneese/demo_yaml_chef_infra.git",
+        "revision": "434d8d753a816e543ff182a7cff6bf6e1a8e3c1e",
+        "working_tree_clean": false,
+        "published": true,
+        "synchronized_remote_branches": [
+          "origin/HEAD -> origin/main",
+          "origin/main"
+        ]
+      },
+      "source_options": {
+        "path": "../cookbooks/demo_yaml_chef_infra"
+      }
+    }
+  },
+  "default_attributes": {
+
+  },
+  "override_attributes": {
+
+  },
+  "solution_dependencies": {
+    "Policyfile": [
+      [
+        "demo_yaml_chef_infra",
+        ">= 0.0.0"
+      ]
+    ],
+    "dependencies": {
+      "demo_yaml_chef_infra (0.1.0)": [
+
+      ]
+    }
+  }
+}

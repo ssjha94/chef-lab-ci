@@ -1,0 +1,51 @@
+{
+  "revision_id": "626dbfe5542b6f45b27431f171aea84ccede5781b350b2a93c4e9d20b7e46a03",
+  "name": "nginx_ohai_plugins",
+  "run_list": [
+    "recipe[nginx_ohai_plugins::default]"
+  ],
+  "included_policy_locks": [
+
+  ],
+  "cookbook_locks": {
+    "nginx_ohai_plugins": {
+      "version": "0.2.0",
+      "identifier": "33de8793256252fe5876ec1242e044615d35d673",
+      "dotted_decimal_identifier": "14599897682895442.71591911874511584.75184966325875",
+      "source": "../cookbooks/nginx_ohai_plugins",
+      "cache_key": null,
+      "scm_info": {
+        "scm": "git",
+        "remote": null,
+        "revision": null,
+        "working_tree_clean": true,
+        "published": false,
+        "synchronized_remote_branches": [
+
+        ]
+      },
+      "source_options": {
+        "path": "../cookbooks/nginx_ohai_plugins"
+      }
+    }
+  },
+  "default_attributes": {
+
+  },
+  "override_attributes": {
+
+  },
+  "solution_dependencies": {
+    "Policyfile": [
+      [
+        "nginx_ohai_plugins",
+        ">= 0.0.0"
+      ]
+    ],
+    "dependencies": {
+      "nginx_ohai_plugins (0.2.0)": [
+
+      ]
+    }
+  }
+}

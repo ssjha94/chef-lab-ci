@@ -1,0 +1,51 @@
+{
+  "revision_id": "09c8b99bbc49fe7a1a802ab560461d9e31169ce55d6e126a222aa5c546b2ef33",
+  "name": "hello_world",
+  "run_list": [
+    "recipe[hello_world::default]"
+  ],
+  "included_policy_locks": [
+
+  ],
+  "cookbook_locks": {
+    "hello_world": {
+      "version": "1.0.1",
+      "identifier": "c2bb9d06f06d1b2e8528de4bcb9006c7a5d49051",
+      "dotted_decimal_identifier": "54812428582546715.13094259503385488.7454550429777",
+      "source": "../cookbooks/hello_world",
+      "cache_key": null,
+      "scm_info": {
+        "scm": "git",
+        "remote": null,
+        "revision": null,
+        "working_tree_clean": true,
+        "published": false,
+        "synchronized_remote_branches": [
+
+        ]
+      },
+      "source_options": {
+        "path": "../cookbooks/hello_world"
+      }
+    }
+  },
+  "default_attributes": {
+
+  },
+  "override_attributes": {
+
+  },
+  "solution_dependencies": {
+    "Policyfile": [
+      [
+        "hello_world",
+        ">= 0.0.0"
+      ]
+    ],
+    "dependencies": {
+      "hello_world (1.0.1)": [
+
+      ]
+    }
+  }
+}

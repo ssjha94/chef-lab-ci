@@ -1,0 +1,51 @@
+{
+  "revision_id": "b4f2ae40691834b363d87966de9966779909b942609c3d615ed1830a777ccdde",
+  "name": "parition",
+  "run_list": [
+    "recipe[parition::default]"
+  ],
+  "included_policy_locks": [
+
+  ],
+  "cookbook_locks": {
+    "parition": {
+      "version": "0.2.0",
+      "identifier": "ca11a5639c2fc56444fb67e910b33a4e0706972c",
+      "dotted_decimal_identifier": "56877347334008773.28223344241873075.64106799732524",
+      "source": "../cookbooks/parition",
+      "cache_key": null,
+      "scm_info": {
+        "scm": "git",
+        "remote": null,
+        "revision": null,
+        "working_tree_clean": true,
+        "published": false,
+        "synchronized_remote_branches": [
+
+        ]
+      },
+      "source_options": {
+        "path": "../cookbooks/parition"
+      }
+    }
+  },
+  "default_attributes": {
+
+  },
+  "override_attributes": {
+
+  },
+  "solution_dependencies": {
+    "Policyfile": [
+      [
+        "parition",
+        ">= 0.0.0"
+      ]
+    ],
+    "dependencies": {
+      "parition (0.2.0)": [
+
+      ]
+    }
+  }
+}
