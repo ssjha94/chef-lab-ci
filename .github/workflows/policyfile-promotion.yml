@@ -1,0 +1,421 @@
+name: Chef Policy Promotion (Policyfile)
+
+on:
+  workflow_dispatch:
+    inputs:
+      policyfile_path:
+        description: "Path to Policyfile (e.g., policyfiles/hello_world.rb)"
+        required: true
+        default: "policyfiles/hello_world.rb"
+        type: string
+      run_converge:
+        description: "Run converge/verify after pushing to prod-full"
+        required: false
+        default: false
+        type: boolean
+      converge_query:
+        description: "Knife search query for converge selection (used when target_nodes is empty)"
+        required: false
+        default: "policy_group:prod-wave1"
+        type: string
+      target_nodes:
+        description: "Optional explicit node names for converge/assignment (comma or space separated, e.g., web-node1,web-node2)"
+        required: false
+        default: ""
+        type: string
+
+env:
+  CHEF_LICENSE: accept-no-persist
+  CHEF_WORKSTATION_VERSION: 25.12.1102-1
+  POLICYFILE_PATH: ${{ inputs.policyfile_path }}
+
+jobs:
+  build-lock:
+    name: Build Policyfile Lock
+    runs-on: ubuntu-latest
+    outputs:
+      policy_name: ${{ steps.lock_meta.outputs.policy_name }}
+      lockfile_path: ${{ steps.lock_meta.outputs.lockfile_path }}
+      lockfile_name: ${{ steps.lock_meta.outputs.lockfile_name }}
+    env:
+      CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
+      CHEF_ORG: ${{ secrets.CHEF_ORG }}
+      CHEF_USER: ${{ secrets.CHEF_USER }}
+      CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+      CHEF_SSL_VERIFY: ${{ secrets.CHEF_SSL_VERIFY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate policyfile input
+        run: |
+          test -f "$POLICYFILE_PATH"
+          case "$POLICYFILE_PATH" in
+            *.rb) ;;
+            *)
+              echo "policyfile_path must point to a .rb file"
+              exit 1
+              ;;
+          esac
+
+      - name: Install Chef Workstation
+        run: |
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation -v ${CHEF_WORKSTATION_VERSION}
+
+      - name: Configure Chef credentials
+        run: |
+          mkdir -p ~/.chef
+          cat > ~/.chef/knife.rb <<'EOF'
+          chef_server_url  ENV['CHEF_SERVER_URL']
+          node_name        ENV['CHEF_USER']
+          client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
+          org_name         ENV['CHEF_ORG'] if ENV['CHEF_ORG']
+          ssl_verify_mode  (ENV['CHEF_SSL_VERIFY'] || ':verify_peer')
+          EOF
+          echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
+          chmod 600 ~/.chef/ci-user.pem
+
+      - name: Build lock from policyfile
+        run: chef install "${POLICYFILE_PATH}"
+
+      - name: Extract lock metadata
+        id: lock_meta
+        run: |
+          lockfile_path="${POLICYFILE_PATH%.rb}.lock.json"
+          lockfile_name="$(basename "${lockfile_path}")"
+          test -f "${lockfile_path}"
+          policy_name="$(ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0]))["name"]' "${lockfile_path}")"
+          if [ -z "${policy_name}" ]; then
+            echo "Policy name was empty in ${lockfile_path}"
+            exit 1
+          fi
+          echo "policy_name=${policy_name}" >> "$GITHUB_OUTPUT"
+          echo "lockfile_path=${lockfile_path}" >> "$GITHUB_OUTPUT"
+          echo "lockfile_name=${lockfile_name}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload lock artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: policy-lock
+          path: ${{ steps.lock_meta.outputs.lockfile_path }}
+
+  push-canary:
+    name: Push prod-canary
+    runs-on: ubuntu-latest
+    needs: build-lock
+    env:
+      CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
+      CHEF_ORG: ${{ secrets.CHEF_ORG }}
+      CHEF_USER: ${{ secrets.CHEF_USER }}
+      CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+      CHEF_SSL_VERIFY: ${{ secrets.CHEF_SSL_VERIFY }}
+      LOCKFILE_PATH: ${{ needs.build-lock.outputs.lockfile_path }}
+      LOCKFILE_NAME: ${{ needs.build-lock.outputs.lockfile_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download lock artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: policy-lock
+          path: .
+
+      - name: Resolve lockfile path
+        id: lock
+        run: |
+          set -euo pipefail
+          if [ -f "${LOCKFILE_PATH}" ]; then
+            found="${LOCKFILE_PATH}"
+          else
+            found="$(find . -type f -name "${LOCKFILE_NAME}" | head -n1 || true)"
+          fi
+          if [ -z "${found}" ]; then
+            echo "Unable to locate lockfile artifact (${LOCKFILE_NAME})"
+            exit 1
+          fi
+          echo "lockfile_path=${found}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Chef Workstation
+        run: |
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation -v ${CHEF_WORKSTATION_VERSION}
+
+      - name: Configure Chef credentials
+        run: |
+          mkdir -p ~/.chef
+          cat > ~/.chef/knife.rb <<'EOF'
+          chef_server_url  ENV['CHEF_SERVER_URL']
+          node_name        ENV['CHEF_USER']
+          client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
+          org_name         ENV['CHEF_ORG'] if ENV['CHEF_ORG']
+          ssl_verify_mode  (ENV['CHEF_SSL_VERIFY'] || ':verify_peer')
+          EOF
+          echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
+          chmod 600 ~/.chef/ci-user.pem
+
+      - name: Rehydrate cookbook cache from lock
+        run: chef install "${{ steps.lock.outputs.lockfile_path }}"
+
+      - name: Push policy to prod-canary
+        run: chef push prod-canary "${{ steps.lock.outputs.lockfile_path }}"
+
+  push-wave1:
+    name: Push prod-wave1
+    runs-on: ubuntu-latest
+    needs: push-canary
+    environment: prod-wave1
+    env:
+      CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
+      CHEF_ORG: ${{ secrets.CHEF_ORG }}
+      CHEF_USER: ${{ secrets.CHEF_USER }}
+      CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+      CHEF_SSL_VERIFY: ${{ secrets.CHEF_SSL_VERIFY }}
+      LOCKFILE_PATH: ${{ needs.build-lock.outputs.lockfile_path }}
+      LOCKFILE_NAME: ${{ needs.build-lock.outputs.lockfile_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download lock artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: policy-lock
+          path: .
+
+      - name: Resolve lockfile path
+        id: lock
+        run: |
+          set -euo pipefail
+          if [ -f "${LOCKFILE_PATH}" ]; then
+            found="${LOCKFILE_PATH}"
+          else
+            found="$(find . -type f -name "${LOCKFILE_NAME}" | head -n1 || true)"
+          fi
+          if [ -z "${found}" ]; then
+            echo "Unable to locate lockfile artifact (${LOCKFILE_NAME})"
+            exit 1
+          fi
+          echo "lockfile_path=${found}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Chef Workstation
+        run: |
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation -v ${CHEF_WORKSTATION_VERSION}
+
+      - name: Configure Chef credentials
+        run: |
+          mkdir -p ~/.chef
+          cat > ~/.chef/knife.rb <<'EOF'
+          chef_server_url  ENV['CHEF_SERVER_URL']
+          node_name        ENV['CHEF_USER']
+          client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
+          org_name         ENV['CHEF_ORG'] if ENV['CHEF_ORG']
+          ssl_verify_mode  (ENV['CHEF_SSL_VERIFY'] || ':verify_peer')
+          EOF
+          echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
+          chmod 600 ~/.chef/ci-user.pem
+
+      - name: Rehydrate cookbook cache from lock
+        run: chef install "${{ steps.lock.outputs.lockfile_path }}"
+
+      - name: Push policy to prod-wave1
+        run: chef push prod-wave1 "${{ steps.lock.outputs.lockfile_path }}"
+
+  push-full:
+    name: Push prod-full
+    runs-on: ubuntu-latest
+    needs: push-wave1
+    environment: prod-full
+    env:
+      CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
+      CHEF_ORG: ${{ secrets.CHEF_ORG }}
+      CHEF_USER: ${{ secrets.CHEF_USER }}
+      CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+      CHEF_SSL_VERIFY: ${{ secrets.CHEF_SSL_VERIFY }}
+      LOCKFILE_PATH: ${{ needs.build-lock.outputs.lockfile_path }}
+      LOCKFILE_NAME: ${{ needs.build-lock.outputs.lockfile_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download lock artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: policy-lock
+          path: .
+
+      - name: Resolve lockfile path
+        id: lock
+        run: |
+          set -euo pipefail
+          if [ -f "${LOCKFILE_PATH}" ]; then
+            found="${LOCKFILE_PATH}"
+          else
+            found="$(find . -type f -name "${LOCKFILE_NAME}" | head -n1 || true)"
+          fi
+          if [ -z "${found}" ]; then
+            echo "Unable to locate lockfile artifact (${LOCKFILE_NAME})"
+            exit 1
+          fi
+          echo "lockfile_path=${found}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Chef Workstation
+        run: |
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation -v ${CHEF_WORKSTATION_VERSION}
+
+      - name: Configure Chef credentials
+        run: |
+          mkdir -p ~/.chef
+          cat > ~/.chef/knife.rb <<'EOF'
+          chef_server_url  ENV['CHEF_SERVER_URL']
+          node_name        ENV['CHEF_USER']
+          client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
+          org_name         ENV['CHEF_ORG'] if ENV['CHEF_ORG']
+          ssl_verify_mode  (ENV['CHEF_SSL_VERIFY'] || ':verify_peer')
+          EOF
+          echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
+          chmod 600 ~/.chef/ci-user.pem
+
+      - name: Rehydrate cookbook cache from lock
+        run: chef install "${{ steps.lock.outputs.lockfile_path }}"
+
+      - name: Push policy to prod-full
+        run: chef push prod-full "${{ steps.lock.outputs.lockfile_path }}"
+
+  converge:
+    name: Optional converge/verify
+    if: ${{ inputs.run_converge }}
+    runs-on: ubuntu-latest
+    needs: [push-full, build-lock]
+    env:
+      CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
+      CHEF_ORG: ${{ secrets.CHEF_ORG }}
+      CHEF_USER: ${{ secrets.CHEF_USER }}
+      CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
+      CHEF_SSL_VERIFY: ${{ secrets.CHEF_SSL_VERIFY }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+      POLICY_NAME: ${{ needs.build-lock.outputs.policy_name }}
+    steps:
+      - name: Install Chef Workstation
+        run: |
+          curl -L https://omnitruck.chef.io/install.sh | sudo bash -s -- -P chef-workstation -v ${CHEF_WORKSTATION_VERSION}
+
+      - name: Configure Chef credentials
+        run: |
+          mkdir -p ~/.chef
+          cat > ~/.chef/knife.rb <<'EOF'
+          chef_server_url  ENV['CHEF_SERVER_URL']
+          knife[:ssh_user] = ENV['SSH_USER'] || 'ubuntu'
+          knife[:identity_file] = File.join(ENV['HOME'], '.ssh', 'ec2.pem')
+          knife[:ssh_verify_host_key] = :never
+          node_name        ENV['CHEF_USER']
+          client_key       File.join(ENV['HOME'], '.chef', 'ci-user.pem')
+          org_name         ENV['CHEF_ORG'] if ENV['CHEF_ORG']
+          ssl_verify_mode  (ENV['CHEF_SSL_VERIFY'] || ':verify_peer')
+          EOF
+          echo "${CHEF_USER_KEY}" > ~/.chef/ci-user.pem
+          chmod 600 ~/.chef/ci-user.pem
+
+      - name: Install SSH key
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "${EC2_SSH_KEY}" > ~/.ssh/ec2.pem
+          chmod 600 ~/.ssh/ec2.pem
+          printf "Host *\n  StrictHostKeyChecking accept-new\n" > ~/.ssh/config
+
+      - name: Assign policy to nodes
+        id: assign
+        env:
+          ASSIGN_QUERY: ${{ inputs.converge_query }}
+          TARGET_NODES_INPUT: ${{ inputs.target_nodes }}
+        run: |
+          set -euo pipefail
+          nodes=()
+
+          if [ -n "${TARGET_NODES_INPUT:-}" ]; then
+            echo "Using explicit target_nodes input"
+            normalized_nodes="$(echo "${TARGET_NODES_INPUT}" | tr '\n;' ',,' | sed 's/[[:space:]]\+/,/g; s/,,*/,/g; s/^,//; s/,$//')"
+            IFS=',' read -r -a candidate_nodes <<< "${normalized_nodes}"
+            for node in "${candidate_nodes[@]}"; do
+              clean_node="$(echo "${node}" | xargs)"
+              if [ -n "${clean_node}" ]; then
+                nodes+=("${clean_node}")
+              fi
+            done
+          else
+            query="${ASSIGN_QUERY:-policy_group:prod-wave1}"
+            echo "Searching nodes with query: ${query}"
+            set +e
+            search_output="$(knife search node "${query}" -i 2>&1)"
+            search_rc=$?
+            set -e
+            printf '%s\n' "${search_output}"
+
+            if [ "${search_rc}" -ne 0 ] && ! printf '%s\n' "${search_output}" | grep -q "^0 items found$"; then
+              echo "knife search failed for query: ${query}"
+              exit "${search_rc}"
+            fi
+
+            mapfile -t nodes < <(printf '%s\n' "${search_output}" | awk 'NF && $0 !~ /items found/ && $0 !~ /^(INFO:|WARN:|ERROR:)/')
+          fi
+
+          if [ "${#nodes[@]}" -eq 0 ]; then
+            echo "No target nodes resolved from target_nodes/converge_query; skipping assignment and converge"
+            echo "target_nodes=" >> "$GITHUB_OUTPUT"
+            echo "target_query=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          missing_nodes=()
+          for node in "${nodes[@]}"; do
+            if ! knife node show "${node}" >/dev/null 2>&1; then
+              missing_nodes+=("${node}")
+            fi
+          done
+          if [ "${#missing_nodes[@]}" -gt 0 ]; then
+            echo "The following target_nodes were not found in Chef: ${missing_nodes[*]}"
+            echo "Available nodes:"
+            knife node list
+            exit 1
+          fi
+
+          for node in "${nodes[@]}"; do
+            echo "Assigning policy ${POLICY_NAME} / group prod-full to ${node}"
+            knife node policy set "${node}" "prod-full" "${POLICY_NAME}"
+          done
+
+          target_nodes_csv="$(IFS=,; echo "${nodes[*]}")"
+          echo "target_nodes=${target_nodes_csv}" >> "$GITHUB_OUTPUT"
+          if [ -n "${TARGET_NODES_INPUT:-}" ]; then
+            target_query="$(printf 'name:%s OR ' "${nodes[@]}")"
+            target_query="${target_query% OR }"
+          else
+            target_query="${query}"
+          fi
+          echo "target_query=${target_query}" >> "$GITHUB_OUTPUT"
+
+      - name: Converge target nodes
+        if: ${{ steps.assign.outputs.target_query != '' }}
+        run: |
+          knife ssh "${{ steps.assign.outputs.target_query }}" "sudo chef-client" \
+            --ssh-user "${SSH_USER:-ubuntu}" \
+            --ssh-identity-file ~/.ssh/ec2.pem \
+            --attribute cloud.public_ipv4 \
+            --no-host-key-verify
+
+      - name: Skip converge (no target nodes)
+        if: ${{ steps.assign.outputs.target_query == '' }}
+        run: echo "No target nodes found from assignment step; skipping converge"
+
+      - name: Report attached policy revisions
+        if: ${{ steps.assign.outputs.target_nodes != '' }}
+        run: |
+          IFS=',' read -r -a report_nodes <<< "${{ steps.assign.outputs.target_nodes }}"
+          for node in "${report_nodes[@]}"; do
+            knife node show "${node}" -a policy_name -a policy_group -a policy_revision
+          done
+
+      - name: Skip policy revision report (no target nodes)
+        if: ${{ steps.assign.outputs.target_nodes == '' }}
+        run: echo "No target nodes found from assignment step; skipping policy revision report"
