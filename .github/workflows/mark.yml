@@ -16,6 +16,20 @@ on:
       policyfile:
         description: 'Policyfile to deploy (name/path, e.g., hello_world.rb or sample_nginix)'
         required: false
+      enable_automate_health_check:
+        description: 'Run Chef Automate node health check after each promotion'
+        required: false
+        default: true
+        type: boolean
+      fail_on_automate_failed_nodes:
+        description: 'Fail workflow when Automate reports failed nodes (manual runs only)'
+        required: false
+        default: false
+        type: boolean
+      automate_additional_filters:
+        description: 'Optional extra Automate filters (comma-separated, e.g., chef_server:chef.example)'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -336,11 +350,126 @@ jobs:
           [ -n "$FOUND" ] || { echo "ERROR: Unable to locate lockfile artifact $LOCK_BASENAME"; exit 1; }
           echo "lockfile_path=$FOUND" >> "$GITHUB_OUTPUT"
 
+      - name: Extract policy metadata
+        id: policy
+        run: |
+          set -euo pipefail
+          POLICY_NAME="$(ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0]))["name"].to_s' "${{ steps.lock.outputs.lockfile_path }}")"
+          [ -n "$POLICY_NAME" ] || { echo "ERROR: policy name missing in lockfile"; exit 1; }
+          echo "policy_name=$POLICY_NAME" >> "$GITHUB_OUTPUT"
+
       - name: Push policy to dev
         run: |
           set -euo pipefail
           echo "Pushing lockfile to dev: ${{ steps.lock.outputs.lockfile_path }}"
           chef push dev "${{ steps.lock.outputs.lockfile_path }}"
+
+      - name: Check Chef Automate health (dev)
+        id: automate_dev
+        env:
+          AUTOMATE_URL: ${{ secrets.AUTOMATE_URL }}
+          AUTOMATE_API_TOKEN: ${{ secrets.AUTOMATE_API_TOKEN }}
+          POLICY_GROUP: dev
+          POLICY_NAME: ${{ steps.policy.outputs.policy_name }}
+          ADDITIONAL_FILTERS: ${{ github.event.inputs.automate_additional_filters }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.enable_automate_health_check }}" = "false" ]; then
+            echo "Automate health check disabled by workflow input."
+            echo "success_count=0" >> "$GITHUB_OUTPUT"
+            echo "failed_count=0" >> "$GITHUB_OUTPUT"
+            echo "total_count=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ -z "${AUTOMATE_URL:-}" ] || [ -z "${AUTOMATE_API_TOKEN:-}" ]; then
+            echo "AUTOMATE_URL/AUTOMATE_API_TOKEN not set, skipping Automate health check."
+            echo "success_count=0" >> "$GITHUB_OUTPUT"
+            echo "failed_count=0" >> "$GITHUB_OUTPUT"
+            echo "total_count=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          endpoint="${AUTOMATE_URL%/}/api/v0/cfgmgmt/stats/node_counts"
+          filters=("policy_group:${POLICY_GROUP}" "policy_name:${POLICY_NAME}")
+          if [ -n "${ADDITIONAL_FILTERS:-}" ]; then
+            IFS=',' read -r -a extra_filters <<< "${ADDITIONAL_FILTERS}"
+            for raw in "${extra_filters[@]}"; do
+              f="$(echo "${raw}" | xargs)"
+              [ -n "${f}" ] && filters+=("${f}")
+            done
+          fi
+
+          query=""
+          for f in "${filters[@]}"; do
+            encoded="$(ruby -ruri -e 'print URI.encode_www_form_component(ARGV[0])' "${f}")"
+            if [ -z "${query}" ]; then
+              query="?filter=${encoded}"
+            else
+              query="${query}&filter=${encoded}"
+            fi
+          done
+          url="${endpoint}${query}"
+          echo "Calling Automate node_counts API for ${POLICY_NAME}/${POLICY_GROUP}"
+          response="$(curl -fsS -H "api-token: ${AUTOMATE_API_TOKEN}" "${url}")"
+          printf '%s\n' "${response}" > automate-node-counts.json
+
+          ruby -rjson <<'RUBY'
+          data = JSON.parse(File.read('automate-node-counts.json'))
+          counts = Hash.new(0)
+
+          def walk(obj, counts)
+            case obj
+            when Hash
+              if obj['status'] && obj['count']
+                counts[obj['status'].to_s.downcase] += obj['count'].to_i
+              elsif obj['name'] && obj['count']
+                counts[obj['name'].to_s.downcase] += obj['count'].to_i
+              else
+                obj.each do |k, v|
+                  key = k.to_s.downcase
+                  if v.is_a?(Numeric) && %w[success failed failure error unreachable skipped total].include?(key)
+                    counts[key] += v.to_i
+                  else
+                    walk(v, counts)
+                  end
+                end
+              end
+            when Array
+              obj.each { |v| walk(v, counts) }
+            end
+          end
+
+          walk(data, counts)
+          success = counts['success']
+          failed = counts['failed'] + counts['failure'] + counts['error'] + counts['unreachable']
+          skipped = counts['skipped']
+          total = counts['total']
+          total = success + failed + skipped if total.zero?
+
+          puts "Automate health summary: success=#{success}, failed=#{failed}, skipped=#{skipped}, total=#{total}"
+          File.open(ENV['GITHUB_OUTPUT'], 'a') do |f|
+            f.puts "success_count=#{success}"
+            f.puts "failed_count=#{failed}"
+            f.puts "total_count=#{total}"
+          end
+          RUBY
+
+      - name: Enforce Automate health gate (dev)
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${{ github.event.inputs.enable_automate_health_check }}" = "false" ] || [ "${{ github.event.inputs.fail_on_automate_failed_nodes }}" = "false" ]; then
+            echo "Automate gate not enabled for this run."
+            exit 0
+          fi
+
+          FAILED="${{ steps.automate_dev.outputs.failed_count }}"
+          TOTAL="${{ steps.automate_dev.outputs.total_count }}"
+          echo "Automate gate check (dev): failed=${FAILED}, total=${TOTAL}"
+          if [ -n "${FAILED}" ] && [ "${FAILED}" -gt 0 ]; then
+            echo "ERROR: Automate reported failed nodes in dev."
+            exit 1
+          fi
 
   push-test:
     name: Push Policy (test)
@@ -418,11 +547,126 @@ jobs:
           [ -n "$FOUND" ] || { echo "ERROR: Unable to locate lockfile artifact $LOCK_BASENAME"; exit 1; }
           echo "lockfile_path=$FOUND" >> "$GITHUB_OUTPUT"
 
+      - name: Extract policy metadata
+        id: policy
+        run: |
+          set -euo pipefail
+          POLICY_NAME="$(ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0]))["name"].to_s' "${{ steps.lock.outputs.lockfile_path }}")"
+          [ -n "$POLICY_NAME" ] || { echo "ERROR: policy name missing in lockfile"; exit 1; }
+          echo "policy_name=$POLICY_NAME" >> "$GITHUB_OUTPUT"
+
       - name: Push policy to test
         run: |
           set -euo pipefail
           echo "Pushing lockfile to test: ${{ steps.lock.outputs.lockfile_path }}"
           chef push test "${{ steps.lock.outputs.lockfile_path }}"
+
+      - name: Check Chef Automate health (test)
+        id: automate_test
+        env:
+          AUTOMATE_URL: ${{ secrets.AUTOMATE_URL }}
+          AUTOMATE_API_TOKEN: ${{ secrets.AUTOMATE_API_TOKEN }}
+          POLICY_GROUP: test
+          POLICY_NAME: ${{ steps.policy.outputs.policy_name }}
+          ADDITIONAL_FILTERS: ${{ github.event.inputs.automate_additional_filters }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.enable_automate_health_check }}" = "false" ]; then
+            echo "Automate health check disabled by workflow input."
+            echo "success_count=0" >> "$GITHUB_OUTPUT"
+            echo "failed_count=0" >> "$GITHUB_OUTPUT"
+            echo "total_count=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ -z "${AUTOMATE_URL:-}" ] || [ -z "${AUTOMATE_API_TOKEN:-}" ]; then
+            echo "AUTOMATE_URL/AUTOMATE_API_TOKEN not set, skipping Automate health check."
+            echo "success_count=0" >> "$GITHUB_OUTPUT"
+            echo "failed_count=0" >> "$GITHUB_OUTPUT"
+            echo "total_count=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          endpoint="${AUTOMATE_URL%/}/api/v0/cfgmgmt/stats/node_counts"
+          filters=("policy_group:${POLICY_GROUP}" "policy_name:${POLICY_NAME}")
+          if [ -n "${ADDITIONAL_FILTERS:-}" ]; then
+            IFS=',' read -r -a extra_filters <<< "${ADDITIONAL_FILTERS}"
+            for raw in "${extra_filters[@]}"; do
+              f="$(echo "${raw}" | xargs)"
+              [ -n "${f}" ] && filters+=("${f}")
+            done
+          fi
+
+          query=""
+          for f in "${filters[@]}"; do
+            encoded="$(ruby -ruri -e 'print URI.encode_www_form_component(ARGV[0])' "${f}")"
+            if [ -z "${query}" ]; then
+              query="?filter=${encoded}"
+            else
+              query="${query}&filter=${encoded}"
+            fi
+          done
+          url="${endpoint}${query}"
+          echo "Calling Automate node_counts API for ${POLICY_NAME}/${POLICY_GROUP}"
+          response="$(curl -fsS -H "api-token: ${AUTOMATE_API_TOKEN}" "${url}")"
+          printf '%s\n' "${response}" > automate-node-counts.json
+
+          ruby -rjson <<'RUBY'
+          data = JSON.parse(File.read('automate-node-counts.json'))
+          counts = Hash.new(0)
+
+          def walk(obj, counts)
+            case obj
+            when Hash
+              if obj['status'] && obj['count']
+                counts[obj['status'].to_s.downcase] += obj['count'].to_i
+              elsif obj['name'] && obj['count']
+                counts[obj['name'].to_s.downcase] += obj['count'].to_i
+              else
+                obj.each do |k, v|
+                  key = k.to_s.downcase
+                  if v.is_a?(Numeric) && %w[success failed failure error unreachable skipped total].include?(key)
+                    counts[key] += v.to_i
+                  else
+                    walk(v, counts)
+                  end
+                end
+              end
+            when Array
+              obj.each { |v| walk(v, counts) }
+            end
+          end
+
+          walk(data, counts)
+          success = counts['success']
+          failed = counts['failed'] + counts['failure'] + counts['error'] + counts['unreachable']
+          skipped = counts['skipped']
+          total = counts['total']
+          total = success + failed + skipped if total.zero?
+
+          puts "Automate health summary: success=#{success}, failed=#{failed}, skipped=#{skipped}, total=#{total}"
+          File.open(ENV['GITHUB_OUTPUT'], 'a') do |f|
+            f.puts "success_count=#{success}"
+            f.puts "failed_count=#{failed}"
+            f.puts "total_count=#{total}"
+          end
+          RUBY
+
+      - name: Enforce Automate health gate (test)
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${{ github.event.inputs.enable_automate_health_check }}" = "false" ] || [ "${{ github.event.inputs.fail_on_automate_failed_nodes }}" = "false" ]; then
+            echo "Automate gate not enabled for this run."
+            exit 0
+          fi
+
+          FAILED="${{ steps.automate_test.outputs.failed_count }}"
+          TOTAL="${{ steps.automate_test.outputs.total_count }}"
+          echo "Automate gate check (test): failed=${FAILED}, total=${TOTAL}"
+          if [ -n "${FAILED}" ] && [ "${FAILED}" -gt 0 ]; then
+            echo "ERROR: Automate reported failed nodes in test."
+            exit 1
+          fi
 
   push-prod:
     name: Push Policy (prod)
@@ -500,8 +744,123 @@ jobs:
           [ -n "$FOUND" ] || { echo "ERROR: Unable to locate lockfile artifact $LOCK_BASENAME"; exit 1; }
           echo "lockfile_path=$FOUND" >> "$GITHUB_OUTPUT"
 
+      - name: Extract policy metadata
+        id: policy
+        run: |
+          set -euo pipefail
+          POLICY_NAME="$(ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0]))["name"].to_s' "${{ steps.lock.outputs.lockfile_path }}")"
+          [ -n "$POLICY_NAME" ] || { echo "ERROR: policy name missing in lockfile"; exit 1; }
+          echo "policy_name=$POLICY_NAME" >> "$GITHUB_OUTPUT"
+
       - name: Push policy to prod
         run: |
           set -euo pipefail
           echo "Pushing lockfile to prod: ${{ steps.lock.outputs.lockfile_path }}"
           chef push prod "${{ steps.lock.outputs.lockfile_path }}"
+
+      - name: Check Chef Automate health (prod)
+        id: automate_prod
+        env:
+          AUTOMATE_URL: ${{ secrets.AUTOMATE_URL }}
+          AUTOMATE_API_TOKEN: ${{ secrets.AUTOMATE_API_TOKEN }}
+          POLICY_GROUP: prod
+          POLICY_NAME: ${{ steps.policy.outputs.policy_name }}
+          ADDITIONAL_FILTERS: ${{ github.event.inputs.automate_additional_filters }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.enable_automate_health_check }}" = "false" ]; then
+            echo "Automate health check disabled by workflow input."
+            echo "success_count=0" >> "$GITHUB_OUTPUT"
+            echo "failed_count=0" >> "$GITHUB_OUTPUT"
+            echo "total_count=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ -z "${AUTOMATE_URL:-}" ] || [ -z "${AUTOMATE_API_TOKEN:-}" ]; then
+            echo "AUTOMATE_URL/AUTOMATE_API_TOKEN not set, skipping Automate health check."
+            echo "success_count=0" >> "$GITHUB_OUTPUT"
+            echo "failed_count=0" >> "$GITHUB_OUTPUT"
+            echo "total_count=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          endpoint="${AUTOMATE_URL%/}/api/v0/cfgmgmt/stats/node_counts"
+          filters=("policy_group:${POLICY_GROUP}" "policy_name:${POLICY_NAME}")
+          if [ -n "${ADDITIONAL_FILTERS:-}" ]; then
+            IFS=',' read -r -a extra_filters <<< "${ADDITIONAL_FILTERS}"
+            for raw in "${extra_filters[@]}"; do
+              f="$(echo "${raw}" | xargs)"
+              [ -n "${f}" ] && filters+=("${f}")
+            done
+          fi
+
+          query=""
+          for f in "${filters[@]}"; do
+            encoded="$(ruby -ruri -e 'print URI.encode_www_form_component(ARGV[0])' "${f}")"
+            if [ -z "${query}" ]; then
+              query="?filter=${encoded}"
+            else
+              query="${query}&filter=${encoded}"
+            fi
+          done
+          url="${endpoint}${query}"
+          echo "Calling Automate node_counts API for ${POLICY_NAME}/${POLICY_GROUP}"
+          response="$(curl -fsS -H "api-token: ${AUTOMATE_API_TOKEN}" "${url}")"
+          printf '%s\n' "${response}" > automate-node-counts.json
+
+          ruby -rjson <<'RUBY'
+          data = JSON.parse(File.read('automate-node-counts.json'))
+          counts = Hash.new(0)
+
+          def walk(obj, counts)
+            case obj
+            when Hash
+              if obj['status'] && obj['count']
+                counts[obj['status'].to_s.downcase] += obj['count'].to_i
+              elsif obj['name'] && obj['count']
+                counts[obj['name'].to_s.downcase] += obj['count'].to_i
+              else
+                obj.each do |k, v|
+                  key = k.to_s.downcase
+                  if v.is_a?(Numeric) && %w[success failed failure error unreachable skipped total].include?(key)
+                    counts[key] += v.to_i
+                  else
+                    walk(v, counts)
+                  end
+                end
+              end
+            when Array
+              obj.each { |v| walk(v, counts) }
+            end
+          end
+
+          walk(data, counts)
+          success = counts['success']
+          failed = counts['failed'] + counts['failure'] + counts['error'] + counts['unreachable']
+          skipped = counts['skipped']
+          total = counts['total']
+          total = success + failed + skipped if total.zero?
+
+          puts "Automate health summary: success=#{success}, failed=#{failed}, skipped=#{skipped}, total=#{total}"
+          File.open(ENV['GITHUB_OUTPUT'], 'a') do |f|
+            f.puts "success_count=#{success}"
+            f.puts "failed_count=#{failed}"
+            f.puts "total_count=#{total}"
+          end
+          RUBY
+
+      - name: Enforce Automate health gate (prod)
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${{ github.event.inputs.enable_automate_health_check }}" = "false" ] || [ "${{ github.event.inputs.fail_on_automate_failed_nodes }}" = "false" ]; then
+            echo "Automate gate not enabled for this run."
+            exit 0
+          fi
+
+          FAILED="${{ steps.automate_prod.outputs.failed_count }}"
+          TOTAL="${{ steps.automate_prod.outputs.total_count }}"
+          echo "Automate gate check (prod): failed=${FAILED}, total=${TOTAL}"
+          if [ -n "${FAILED}" ] && [ "${FAILED}" -gt 0 ]; then
+            echo "ERROR: Automate reported failed nodes in prod."
+            exit 1
+          fi
