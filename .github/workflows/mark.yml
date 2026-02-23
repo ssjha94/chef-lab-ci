@@ -283,7 +283,6 @@ jobs:
       matrix:
         policyfile: ${{ fromJson(needs.detect-policyfiles.outputs.policyfiles) }}
       fail-fast: false
-    environment: dev
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -303,6 +302,20 @@ jobs:
           CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
           CHEF_SSL_VERIFY: ${{ secrets.CHEF_SSL_VERIFY }}
         run: |
+          set -euo pipefail
+          for req in CHEF_SERVER_URL CHEF_USER CHEF_USER_KEY; do
+            if [ -z "${!req:-}" ]; then
+              echo "ERROR: Missing required secret ${req}. Check repository secrets and environment secret overrides."
+              exit 1
+            fi
+          done
+          case "${CHEF_SERVER_URL}" in
+            http://*|https://*|chefzero://*) ;;
+            *)
+              echo "ERROR: CHEF_SERVER_URL is invalid. It must start with http://, https://, or chefzero://."
+              exit 1
+              ;;
+          esac
           mkdir -p ~/.chef
           cat > ~/.chef/knife.rb <<'EOF'
           chef_server_url  ENV['CHEF_SERVER_URL']
@@ -500,6 +513,20 @@ jobs:
           CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
           CHEF_SSL_VERIFY: ${{ secrets.CHEF_SSL_VERIFY }}
         run: |
+          set -euo pipefail
+          for req in CHEF_SERVER_URL CHEF_USER CHEF_USER_KEY; do
+            if [ -z "${!req:-}" ]; then
+              echo "ERROR: Missing required secret ${req}. Check repository secrets and environment secret overrides."
+              exit 1
+            fi
+          done
+          case "${CHEF_SERVER_URL}" in
+            http://*|https://*|chefzero://*) ;;
+            *)
+              echo "ERROR: CHEF_SERVER_URL is invalid. It must start with http://, https://, or chefzero://."
+              exit 1
+              ;;
+          esac
           mkdir -p ~/.chef
           cat > ~/.chef/knife.rb <<'EOF'
           chef_server_url  ENV['CHEF_SERVER_URL']
@@ -697,6 +724,20 @@ jobs:
           CHEF_USER_KEY: ${{ secrets.CHEF_USER_KEY }}
           CHEF_SSL_VERIFY: ${{ secrets.CHEF_SSL_VERIFY }}
         run: |
+          set -euo pipefail
+          for req in CHEF_SERVER_URL CHEF_USER CHEF_USER_KEY; do
+            if [ -z "${!req:-}" ]; then
+              echo "ERROR: Missing required secret ${req}. Check repository secrets and environment secret overrides."
+              exit 1
+            fi
+          done
+          case "${CHEF_SERVER_URL}" in
+            http://*|https://*|chefzero://*) ;;
+            *)
+              echo "ERROR: CHEF_SERVER_URL is invalid. It must start with http://, https://, or chefzero://."
+              exit 1
+              ;;
+          esac
           mkdir -p ~/.chef
           cat > ~/.chef/knife.rb <<'EOF'
           chef_server_url  ENV['CHEF_SERVER_URL']
