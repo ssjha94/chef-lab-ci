@@ -433,40 +433,39 @@ jobs:
           }
 
           summarize_response() {
-            ruby -rjson <<'RUBY'
-            data = JSON.parse(STDIN.read)
-            counts = Hash.new(0)
-
-            def walk(obj, counts)
-              case obj
-              when Hash
-                if obj['status'] && obj['count']
-                  counts[obj['status'].to_s.downcase] += obj['count'].to_i
-                elsif obj['name'] && obj['count']
-                  counts[obj['name'].to_s.downcase] += obj['count'].to_i
-                else
-                  obj.each do |k, v|
-                    key = k.to_s.downcase
-                    if v.is_a?(Numeric) && %w[success failed failure error unreachable skipped total].include?(key)
-                      counts[key] += v.to_i
-                    else
-                      walk(v, counts)
+            ruby -rjson -e '
+              data = JSON.parse(STDIN.read)
+              counts = Hash.new(0)
+              walk = lambda do |obj|
+                case obj
+                when Hash
+                  if obj["status"] && obj["count"]
+                    counts[obj["status"].to_s.downcase] += obj["count"].to_i
+                  elsif obj["name"] && obj["count"]
+                    counts[obj["name"].to_s.downcase] += obj["count"].to_i
+                  else
+                    obj.each do |k, v|
+                      key = k.to_s.downcase
+                      if v.is_a?(Numeric) && %w[success failed failure error unreachable skipped total].include?(key)
+                        counts[key] += v.to_i
+                      else
+                        walk.call(v)
+                      end
                     end
                   end
+                when Array
+                  obj.each { |v| walk.call(v) }
                 end
-              when Array
-                obj.each { |v| walk(v, counts) }
               end
-            end
 
-            walk(data, counts)
-            success = counts['success']
-            failed = counts['failed'] + counts['failure'] + counts['error'] + counts['unreachable']
-            skipped = counts['skipped']
-            total = counts['total']
-            total = success + failed + skipped if total.zero?
-            puts "#{success} #{failed} #{skipped} #{total}"
-            RUBY
+              walk.call(data)
+              success = counts["success"]
+              failed = counts["failed"] + counts["failure"] + counts["error"] + counts["unreachable"]
+              skipped = counts["skipped"]
+              total = counts["total"]
+              total = success + failed + skipped if total.zero?
+              puts "#{success} #{failed} #{skipped} #{total}"
+            '
           }
 
           base_url="$(build_url)"
@@ -649,40 +648,39 @@ jobs:
           }
 
           summarize_response() {
-            ruby -rjson <<'RUBY'
-            data = JSON.parse(STDIN.read)
-            counts = Hash.new(0)
-
-            def walk(obj, counts)
-              case obj
-              when Hash
-                if obj['status'] && obj['count']
-                  counts[obj['status'].to_s.downcase] += obj['count'].to_i
-                elsif obj['name'] && obj['count']
-                  counts[obj['name'].to_s.downcase] += obj['count'].to_i
-                else
-                  obj.each do |k, v|
-                    key = k.to_s.downcase
-                    if v.is_a?(Numeric) && %w[success failed failure error unreachable skipped total].include?(key)
-                      counts[key] += v.to_i
-                    else
-                      walk(v, counts)
+            ruby -rjson -e '
+              data = JSON.parse(STDIN.read)
+              counts = Hash.new(0)
+              walk = lambda do |obj|
+                case obj
+                when Hash
+                  if obj["status"] && obj["count"]
+                    counts[obj["status"].to_s.downcase] += obj["count"].to_i
+                  elsif obj["name"] && obj["count"]
+                    counts[obj["name"].to_s.downcase] += obj["count"].to_i
+                  else
+                    obj.each do |k, v|
+                      key = k.to_s.downcase
+                      if v.is_a?(Numeric) && %w[success failed failure error unreachable skipped total].include?(key)
+                        counts[key] += v.to_i
+                      else
+                        walk.call(v)
+                      end
                     end
                   end
+                when Array
+                  obj.each { |v| walk.call(v) }
                 end
-              when Array
-                obj.each { |v| walk(v, counts) }
               end
-            end
 
-            walk(data, counts)
-            success = counts['success']
-            failed = counts['failed'] + counts['failure'] + counts['error'] + counts['unreachable']
-            skipped = counts['skipped']
-            total = counts['total']
-            total = success + failed + skipped if total.zero?
-            puts "#{success} #{failed} #{skipped} #{total}"
-            RUBY
+              walk.call(data)
+              success = counts["success"]
+              failed = counts["failed"] + counts["failure"] + counts["error"] + counts["unreachable"]
+              skipped = counts["skipped"]
+              total = counts["total"]
+              total = success + failed + skipped if total.zero?
+              puts "#{success} #{failed} #{skipped} #{total}"
+            '
           }
 
           base_url="$(build_url)"
@@ -865,40 +863,39 @@ jobs:
           }
 
           summarize_response() {
-            ruby -rjson <<'RUBY'
-            data = JSON.parse(STDIN.read)
-            counts = Hash.new(0)
-
-            def walk(obj, counts)
-              case obj
-              when Hash
-                if obj['status'] && obj['count']
-                  counts[obj['status'].to_s.downcase] += obj['count'].to_i
-                elsif obj['name'] && obj['count']
-                  counts[obj['name'].to_s.downcase] += obj['count'].to_i
-                else
-                  obj.each do |k, v|
-                    key = k.to_s.downcase
-                    if v.is_a?(Numeric) && %w[success failed failure error unreachable skipped total].include?(key)
-                      counts[key] += v.to_i
-                    else
-                      walk(v, counts)
+            ruby -rjson -e '
+              data = JSON.parse(STDIN.read)
+              counts = Hash.new(0)
+              walk = lambda do |obj|
+                case obj
+                when Hash
+                  if obj["status"] && obj["count"]
+                    counts[obj["status"].to_s.downcase] += obj["count"].to_i
+                  elsif obj["name"] && obj["count"]
+                    counts[obj["name"].to_s.downcase] += obj["count"].to_i
+                  else
+                    obj.each do |k, v|
+                      key = k.to_s.downcase
+                      if v.is_a?(Numeric) && %w[success failed failure error unreachable skipped total].include?(key)
+                        counts[key] += v.to_i
+                      else
+                        walk.call(v)
+                      end
                     end
                   end
+                when Array
+                  obj.each { |v| walk.call(v) }
                 end
-              when Array
-                obj.each { |v| walk(v, counts) }
               end
-            end
 
-            walk(data, counts)
-            success = counts['success']
-            failed = counts['failed'] + counts['failure'] + counts['error'] + counts['unreachable']
-            skipped = counts['skipped']
-            total = counts['total']
-            total = success + failed + skipped if total.zero?
-            puts "#{success} #{failed} #{skipped} #{total}"
-            RUBY
+              walk.call(data)
+              success = counts["success"]
+              failed = counts["failed"] + counts["failure"] + counts["error"] + counts["unreachable"]
+              skipped = counts["skipped"]
+              total = counts["total"]
+              total = success + failed + skipped if total.zero?
+              puts "#{success} #{failed} #{skipped} #{total}"
+            '
           }
 
           base_url="$(build_url)"
