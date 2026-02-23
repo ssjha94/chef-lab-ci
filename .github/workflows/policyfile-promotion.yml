@@ -162,7 +162,7 @@ jobs:
   push-wave1:
     name: Push prod-wave1
     runs-on: ubuntu-latest
-    needs: push-canary
+    needs: [push-canary, build-lock]
     environment: prod-wave1
     env:
       CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
@@ -223,7 +223,7 @@ jobs:
   push-full:
     name: Push prod-full
     runs-on: ubuntu-latest
-    needs: push-wave1
+    needs: [push-wave1, build-lock]
     environment: prod-full
     env:
       CHEF_SERVER_URL: ${{ secrets.CHEF_SERVER_URL }}
