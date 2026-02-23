@@ -302,6 +302,15 @@ jobs:
               cmd+=(--bootstrap-version "${BOOTSTRAP_VERSION}")
             fi
 
+            # Inject data collector config into client.rb BEFORE first chef-client run
+            # Required by cookbooks that use compliance phase (include_profile)
+            if [ -n "${DATA_COLLECTOR_URL:-}" ] && [ -n "${DATA_COLLECTOR_TOKEN:-}" ]; then
+              cmd+=(
+                --config-option "data_collector.server_url=\"${DATA_COLLECTOR_URL}\""
+                --config-option "data_collector.token=\"${DATA_COLLECTOR_TOKEN}\""
+              )
+            fi
+
             "${cmd[@]}"
           done
 
