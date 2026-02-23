@@ -58,7 +58,25 @@ jobs:
           INPUT_COOKBOOK="${{ github.event.inputs.cookbook }}"
 
           if [ -n "$INPUT_COOKBOOK" ]; then
-            COOKBOOKS=$(printf '%s\n' "$INPUT_COOKBOOK" | jq -R -s -c 'split("\n")[:-1]')
+            if [ -d "cookbooks/$INPUT_COOKBOOK" ]; then
+              RESOLVED_COOKBOOK="$INPUT_COOKBOOK"
+            else
+              RESOLVED_COOKBOOK="$(
+                find cookbooks -mindepth 1 -maxdepth 1 -type d -exec basename {} \; \
+                  | awk -v q="$INPUT_COOKBOOK" 'tolower($0)==tolower(q){print; exit}'
+              )"
+            fi
+
+            if [ -z "${RESOLVED_COOKBOOK:-}" ]; then
+              echo "ERROR: Cookbook '$INPUT_COOKBOOK' not found under cookbooks/."
+              echo "Available similar names:"
+              escaped="$(printf '%s' "$INPUT_COOKBOOK" | sed 's/[][(){}.^$*+?\/|]/\\&/g; s/_/.*/g')"
+              find cookbooks -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | rg -i "${escaped}" || true
+              echo "Tip: repository contains 'sample_nginix' (not 'sample_nginx')."
+              exit 1
+            fi
+
+            COOKBOOKS=$(printf '%s\n' "$RESOLVED_COOKBOOK" | jq -R -s -c 'split("\n")[:-1]')
           else
             if [ "${{ github.event_name }}" = "push" ] && [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
               DIFF_RANGE="${{ github.event.before }}...${{ github.sha }}"
@@ -99,8 +117,18 @@ jobs:
           fetch-depth: 0
 
       - name: Validate version bump
-        working-directory: cookbooks/${{ matrix.cookbook }}
         run: |
+          COOKBOOK_DIR="cookbooks/${{ matrix.cookbook }}"
+          if [ ! -d "$COOKBOOK_DIR" ]; then
+            echo "ERROR: Cookbook directory does not exist: $COOKBOOK_DIR"
+            exit 1
+          fi
+          if [ ! -f "$COOKBOOK_DIR/metadata.rb" ]; then
+            echo "ERROR: metadata.rb not found: $COOKBOOK_DIR/metadata.rb"
+            exit 1
+          fi
+          cd "$COOKBOOK_DIR"
+
           echo "Validating version bump for ${{ matrix.cookbook }}..."
 
           CURRENT_VERSION=$(grep -E "^version" metadata.rb | head -1 | awk '{print $2}' | tr -d "'\"")
