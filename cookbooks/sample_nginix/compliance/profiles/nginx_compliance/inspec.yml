@@ -1,0 +1,10 @@
+name: nginx_compliance
+title: Nginx Compliance Profile
+maintainer: sjha
+copyright: sjha
+copyright_email: sjha@example.com
+license: All Rights Reserved
+summary: InSpec profile to verify nginx installation and configuration
+version: 0.1.0
+supports:
+  - platform-family: linux

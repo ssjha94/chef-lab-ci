@@ -1,0 +1,9 @@
+---
+name: cis-ubuntu22.04lts-level1-server
+title: CIS Ubuntu Linux 22.04 LTS Benchmark Level 1 - Server
+summary: CIS Ubuntu Linux 22.04 LTS Benchmark Level 1 - Server translated from SCAP
+version: 2.0.0-1
+maintainer: Chef Software, Inc.
+copyright: Chef Software, Inc.
+copyright_email: support@chef.io
+license: Proprietary, All rights reserved

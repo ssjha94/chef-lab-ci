@@ -1,0 +1,69 @@
+class SecurityDescriptor < Inspec.resource(1)
+  name 'security_descriptor'
+  supports supports platform: 'windows'
+  desc 'Represents the security descriptor for a file in Windows'
+  example "
+  describe security_descriptor('C:\\windows\\system32\\EventVwr.exe') do
+    # Assert the set of entities with a given permission
+    its('ReadAndExecute') { should_not include 'S-1-5-32-546' }
+    # Assert the permissions for a given entity
+    its('S-1-5-32-544') { should_not include 'Write' }
+  end
+  "
+
+  def initialize(filename, _options = {})
+    @filename = filename
+    @results = nil
+  end
+
+  %w(Read ReadAndExecute Write Modify Sychronize FullControl).each do |perm|
+    define_method perm do
+      fetch_results unless @results
+      # Return keys that have this permission, with the domain stripped
+      @results.select { |_k, v| v.include?(perm) }.keys.map { |key| key.split('\\')[-1] }
+    end
+  end
+
+  def method_missing(name)
+    fetch_results unless @results
+    # Return the results for this entity if it exists (with some domain name) in the result set
+    entity_key = @results.keys.select { |key| key.split('\\')[-1] == name.to_s }[0]
+    return @results[entity_key] if entity_key
+    # Entity not in the result set is "no permissions"
+    []
+  end
+
+  def to_s
+    "Security Descriptor for #{@filename}"
+  end
+
+  private
+
+  def fetch_results
+    @results = {}
+    cmd = inspec.powershell("Get-Acl #{@filename} | select -expand access")
+    raise cmd.stderr.strip unless cmd.stderr == ''
+    access_details = cmd.stdout.strip.split("\r\n\r\n").map { |entry| entry.split("\r\n") }
+    access_details.each do |access_detail|
+      entity = access_detail.select { |a| a =~ /^IdentityReference/ }[0].tr(' ', '').split(':')[-1]
+      permissions = access_detail.select { |a| a =~ /^FileSystemRights/ }[0].tr(' ', '').split(':')[-1].split(',')
+      # Get-Acl displays entity names in its results rather than SIDs.
+      # It is preferable to work with SIDs when testing security
+      # Replace the entity name from Get-Acl with a SID where possible.
+      entity_id = get_sid(entity.split('\\')[-1])
+      @results[entity_id] = permissions
+    end
+  end
+
+  def get_sid(entity_name)
+    # replacing wmic with Get-LocalGroup and Get-LocalUser as it is deprecated in windows 10/11.
+    # For more information: https://techcommunity.microsoft.com/blog/windows-itpro-blog/wmi-command-line-wmic-utility-deprecation-next-steps/4039242#
+    group_sids = inspec.command("Get-LocalGroup | Where-Object { $_.Name -eq '#{entity_name}' } | Select-Object Name,SID | ConvertTo-Csv -NoTypeInformation").stdout.strip.split("\r\n").drop(1).map { |entry| entry.split(',').map { |e| e.gsub('"', '') } }
+    return group_sids[0][1] unless group_sids.empty?
+    user_sids = inspec.command("Get-LocalUser | Where-Object { $_.Name -eq '#{entity_name}' } | Select-Object Name,SID | ConvertTo-Csv -NoTypeInformation").stdout.strip.split("\r\n").drop(1).map { |entry| entry.split(',').map { |e| e.gsub('"', '') } }
+    return user_sids[0][1] unless user_sids.empty?
+    service_sids = inspec.command("sc.exe showSid \"#{entity_name}\" | Select-String -Pattern Service").stdout.strip.split("\r\n\r\n").map { |entry| entry.split(': ') }
+    return service_sids[0][1] unless service_sids.empty?
+    entity_name
+  end
+end
