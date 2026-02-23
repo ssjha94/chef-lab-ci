@@ -91,6 +91,7 @@ jobs:
         uses: hashicorp/setup-terraform@v2
         with:
           terraform_version: "1.6.0"
+          terraform_wrapper: false
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -123,12 +124,16 @@ jobs:
         working-directory: ${{ inputs.terraform_workdir }}
         run: |
           set -euo pipefail
-          target_hosts_json="$(terraform output -raw instance_ips)"
+          target_hosts_json="$(terraform output -raw instance_ips | tr -d '\r')"
           if [ -z "${target_hosts_json}" ]; then
             echo "No instance_ips output returned by Terraform"
             exit 1
           fi
-          echo "target_hosts_json=${target_hosts_json}" >> "$GITHUB_OUTPUT"
+          {
+            echo "target_hosts_json<<EOF"
+            echo "${target_hosts_json}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
   resolve_targets:
     name: Resolve Target Hosts
