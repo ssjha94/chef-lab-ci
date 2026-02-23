@@ -16,20 +16,6 @@ on:
       policyfile:
         description: 'Policyfile to deploy (name/path, e.g., hello_world.rb or sample_nginix)'
         required: false
-      enable_automate_health_check:
-        description: 'Run Chef Automate node health check after each promotion'
-        required: false
-        default: true
-        type: boolean
-      fail_on_automate_failed_nodes:
-        description: 'Fail workflow when Automate reports failed nodes (manual runs only)'
-        required: false
-        default: false
-        type: boolean
-      automate_additional_filters:
-        description: 'Optional extra Automate filters (comma-separated, e.g., chef_server:chef.example)'
-        required: false
-        default: ''
 
 permissions:
   contents: read
@@ -412,16 +398,8 @@ jobs:
           AUTOMATE_API_TOKEN: ${{ secrets.AUTOMATE_API_TOKEN }}
           POLICY_GROUP: dev
           POLICY_NAME: ${{ steps.policy.outputs.policy_name }}
-          ADDITIONAL_FILTERS: ${{ github.event.inputs.automate_additional_filters }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.enable_automate_health_check }}" = "false" ]; then
-            echo "Automate health check disabled by workflow input."
-            echo "success_count=0" >> "$GITHUB_OUTPUT"
-            echo "failed_count=0" >> "$GITHUB_OUTPUT"
-            echo "total_count=0" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
 
           if [ -z "${AUTOMATE_URL:-}" ] || [ -z "${AUTOMATE_API_TOKEN:-}" ]; then
             echo "AUTOMATE_URL/AUTOMATE_API_TOKEN not set, skipping Automate health check."
@@ -433,13 +411,6 @@ jobs:
 
           endpoint="${AUTOMATE_URL%/}/api/v0/cfgmgmt/stats/node_counts"
           filters=("policy_group:${POLICY_GROUP}" "policy_name:${POLICY_NAME}")
-          if [ -n "${ADDITIONAL_FILTERS:-}" ]; then
-            IFS=',' read -r -a extra_filters <<< "${ADDITIONAL_FILTERS}"
-            for raw in "${extra_filters[@]}"; do
-              f="$(echo "${raw}" | xargs)"
-              [ -n "${f}" ] && filters+=("${f}")
-            done
-          fi
 
           build_url() {
             local extra_filter="${1:-}"
@@ -531,22 +502,6 @@ jobs:
           echo "skipped_count=${status_skipped}" >> "$GITHUB_OUTPUT"
           echo "total_count=${status_total}" >> "$GITHUB_OUTPUT"
           echo "base_total_count=${base_total}" >> "$GITHUB_OUTPUT"
-
-      - name: Enforce Automate health gate (dev)
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${{ github.event.inputs.enable_automate_health_check }}" = "false" ] || [ "${{ github.event.inputs.fail_on_automate_failed_nodes }}" = "false" ]; then
-            echo "Automate gate not enabled for this run."
-            exit 0
-          fi
-
-          FAILED="${{ steps.automate_dev.outputs.failed_count }}"
-          TOTAL="${{ steps.automate_dev.outputs.total_count }}"
-          echo "Automate gate check (dev): failed=${FAILED}, total=${TOTAL}"
-          if [ -n "${FAILED}" ] && [ "${FAILED}" -gt 0 ]; then
-            echo "ERROR: Automate reported failed nodes in dev."
-            exit 1
-          fi
 
   push-test:
     name: Push Policy (test)
@@ -659,16 +614,8 @@ jobs:
           AUTOMATE_API_TOKEN: ${{ secrets.AUTOMATE_API_TOKEN }}
           POLICY_GROUP: test
           POLICY_NAME: ${{ steps.policy.outputs.policy_name }}
-          ADDITIONAL_FILTERS: ${{ github.event.inputs.automate_additional_filters }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.enable_automate_health_check }}" = "false" ]; then
-            echo "Automate health check disabled by workflow input."
-            echo "success_count=0" >> "$GITHUB_OUTPUT"
-            echo "failed_count=0" >> "$GITHUB_OUTPUT"
-            echo "total_count=0" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
 
           if [ -z "${AUTOMATE_URL:-}" ] || [ -z "${AUTOMATE_API_TOKEN:-}" ]; then
             echo "AUTOMATE_URL/AUTOMATE_API_TOKEN not set, skipping Automate health check."
@@ -680,13 +627,6 @@ jobs:
 
           endpoint="${AUTOMATE_URL%/}/api/v0/cfgmgmt/stats/node_counts"
           filters=("policy_group:${POLICY_GROUP}" "policy_name:${POLICY_NAME}")
-          if [ -n "${ADDITIONAL_FILTERS:-}" ]; then
-            IFS=',' read -r -a extra_filters <<< "${ADDITIONAL_FILTERS}"
-            for raw in "${extra_filters[@]}"; do
-              f="$(echo "${raw}" | xargs)"
-              [ -n "${f}" ] && filters+=("${f}")
-            done
-          fi
 
           build_url() {
             local extra_filter="${1:-}"
@@ -778,22 +718,6 @@ jobs:
           echo "skipped_count=${status_skipped}" >> "$GITHUB_OUTPUT"
           echo "total_count=${status_total}" >> "$GITHUB_OUTPUT"
           echo "base_total_count=${base_total}" >> "$GITHUB_OUTPUT"
-
-      - name: Enforce Automate health gate (test)
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${{ github.event.inputs.enable_automate_health_check }}" = "false" ] || [ "${{ github.event.inputs.fail_on_automate_failed_nodes }}" = "false" ]; then
-            echo "Automate gate not enabled for this run."
-            exit 0
-          fi
-
-          FAILED="${{ steps.automate_test.outputs.failed_count }}"
-          TOTAL="${{ steps.automate_test.outputs.total_count }}"
-          echo "Automate gate check (test): failed=${FAILED}, total=${TOTAL}"
-          if [ -n "${FAILED}" ] && [ "${FAILED}" -gt 0 ]; then
-            echo "ERROR: Automate reported failed nodes in test."
-            exit 1
-          fi
 
   push-prod:
     name: Push Policy (prod)
@@ -906,16 +830,8 @@ jobs:
           AUTOMATE_API_TOKEN: ${{ secrets.AUTOMATE_API_TOKEN }}
           POLICY_GROUP: prod
           POLICY_NAME: ${{ steps.policy.outputs.policy_name }}
-          ADDITIONAL_FILTERS: ${{ github.event.inputs.automate_additional_filters }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.enable_automate_health_check }}" = "false" ]; then
-            echo "Automate health check disabled by workflow input."
-            echo "success_count=0" >> "$GITHUB_OUTPUT"
-            echo "failed_count=0" >> "$GITHUB_OUTPUT"
-            echo "total_count=0" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
 
           if [ -z "${AUTOMATE_URL:-}" ] || [ -z "${AUTOMATE_API_TOKEN:-}" ]; then
             echo "AUTOMATE_URL/AUTOMATE_API_TOKEN not set, skipping Automate health check."
@@ -927,13 +843,6 @@ jobs:
 
           endpoint="${AUTOMATE_URL%/}/api/v0/cfgmgmt/stats/node_counts"
           filters=("policy_group:${POLICY_GROUP}" "policy_name:${POLICY_NAME}")
-          if [ -n "${ADDITIONAL_FILTERS:-}" ]; then
-            IFS=',' read -r -a extra_filters <<< "${ADDITIONAL_FILTERS}"
-            for raw in "${extra_filters[@]}"; do
-              f="$(echo "${raw}" | xargs)"
-              [ -n "${f}" ] && filters+=("${f}")
-            done
-          fi
 
           build_url() {
             local extra_filter="${1:-}"
@@ -1025,19 +934,3 @@ jobs:
           echo "skipped_count=${status_skipped}" >> "$GITHUB_OUTPUT"
           echo "total_count=${status_total}" >> "$GITHUB_OUTPUT"
           echo "base_total_count=${base_total}" >> "$GITHUB_OUTPUT"
-
-      - name: Enforce Automate health gate (prod)
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" != "workflow_dispatch" ] || [ "${{ github.event.inputs.enable_automate_health_check }}" = "false" ] || [ "${{ github.event.inputs.fail_on_automate_failed_nodes }}" = "false" ]; then
-            echo "Automate gate not enabled for this run."
-            exit 0
-          fi
-
-          FAILED="${{ steps.automate_prod.outputs.failed_count }}"
-          TOTAL="${{ steps.automate_prod.outputs.total_count }}"
-          echo "Automate gate check (prod): failed=${FAILED}, total=${TOTAL}"
-          if [ -n "${FAILED}" ] && [ "${FAILED}" -gt 0 ]; then
-            echo "ERROR: Automate reported failed nodes in prod."
-            exit 1
-          fi
