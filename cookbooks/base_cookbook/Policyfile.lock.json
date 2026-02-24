@@ -1,0 +1,52 @@
+{
+  "revision_id": "21edaf0c0cc448c979df2d0bca9f90ffb12415d783a359d066e8be980c2a5237",
+  "name": "base_cookbook",
+  "run_list": [
+    "recipe[base_cookbook::default]"
+  ],
+  "included_policy_locks": [
+
+  ],
+  "cookbook_locks": {
+    "base_cookbook": {
+      "version": "0.1.0",
+      "identifier": "092663b57e0518f3a23874979a8d0073ee8ed597",
+      "dotted_decimal_identifier": "2575484478948632.68576782698650253.497923577239",
+      "source": ".",
+      "cache_key": null,
+      "scm_info": {
+        "scm": "git",
+        "remote": "https://github.com/ssjha94/chef-lab-ci.git",
+        "revision": "84280384cc7059af2d3576d39ce78abedc52b164",
+        "working_tree_clean": false,
+        "published": true,
+        "synchronized_remote_branches": [
+          "origin/HEAD -> origin/main",
+          "origin/main"
+        ]
+      },
+      "source_options": {
+        "path": "."
+      }
+    }
+  },
+  "default_attributes": {
+
+  },
+  "override_attributes": {
+
+  },
+  "solution_dependencies": {
+    "Policyfile": [
+      [
+        "base_cookbook",
+        ">= 0.0.0"
+      ]
+    ],
+    "dependencies": {
+      "base_cookbook (0.1.0)": [
+
+      ]
+    }
+  }
+}

@@ -1,0 +1,12 @@
+name: base_cookbook_compliance
+title: Base Cookbook Compliance Profile
+maintainer: SSJ Labs
+copyright: SSJ Labs
+copyright_email: sjha@progress.com
+license: Apache-2.0
+summary: Validates base_cookbook - data_collector and audit compliance configuration
+version: 0.1.0
+supports:
+  - platform-family: debian
+  - platform-family: redhat
+  - platform-family: windows
